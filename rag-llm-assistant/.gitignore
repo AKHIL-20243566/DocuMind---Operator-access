@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.cache/
+vector_store/*.index
+data/processed/
+models/*.bin
+notebooks/.ipynb_checkpoints/
