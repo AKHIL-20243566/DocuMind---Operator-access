@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
-from rag import retrieve_context, ingest_file, delete_document, list_documents
+from rag import retrieve_context, ingest_file, delete_document, list_documents, has_embeddings
 from llm import (
     generate_answer, generate_answer_stream,
     should_use_context, check_ollama, is_ollama_available,
@@ -123,6 +123,16 @@ def chat(q: Question, request: Request):
     start = time.time()
 
     try:
+        if not has_embeddings():
+            return {
+                "answer": "No documents available for this chat",
+                "sources": [],
+                "confidence": 0,
+                "context": [],
+                "mode": "llm",
+                "ollama_connected": is_ollama_available(),
+            }
+
         retrieved_docs = retrieve_context(question)
         use_context = should_use_context(retrieved_docs)
         answer = generate_answer(question, retrieved_docs, use_context)
@@ -167,6 +177,21 @@ def chat_stream(q: Question, request: Request):
 
     if check_prompt_injection(question):
         raise HTTPException(status_code=400, detail="Your query was blocked by the safety filter.")
+
+    if not has_embeddings():
+        def empty_stream():
+            meta = {
+                "type": "meta",
+                "sources": [],
+                "confidence": 0,
+                "context": [],
+                "mode": "llm",
+            }
+            yield f"data: {json.dumps(meta)}\n\n"
+            yield f"data: {json.dumps({'type': 'token', 'content': 'No documents available for this chat'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
     retrieved_docs = retrieve_context(question)
     use_context = should_use_context(retrieved_docs)
@@ -223,9 +248,23 @@ async def upload_file(file: UploadFile = File(...), request: Request = None):
     result = ingest_file(content, file.filename)
 
     if result["success"]:
-        logger.info(f"Upload: {file.filename} ({result['chunks']} chunks)")
+        logger.info(
+            "Upload success | file=%s chunks=%s loader=%s ocr_triggered=%s",
+            file.filename,
+            result.get("chunks"),
+            result.get("loader_used"),
+            result.get("ocr_triggered", False),
+        )
         return result
-    raise HTTPException(status_code=422, detail=result["error"])
+    logger.error(
+        "Upload failed | file=%s error_code=%s loader=%s ocr_triggered=%s error=%s",
+        file.filename,
+        result.get("error_code"),
+        result.get("loader_used"),
+        result.get("ocr_triggered", False),
+        result.get("error"),
+    )
+    raise HTTPException(status_code=422, detail=result)
 
 
 # ---------------------------------------------------------------------------

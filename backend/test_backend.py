@@ -127,6 +127,75 @@ class TestDocumentParser:
         assert is_supported("test.md")
         assert not is_supported("test.exe")
 
+    def test_pdf_normal_extraction_success(self, monkeypatch):
+        from document_parser import parse_bytes_with_diagnostics
+
+        monkeypatch.setattr(
+            "document_parser._parse_pdf_bytes",
+            lambda content, filename: [{"text": "Normal PDF text", "source": filename, "page": 1, "chunk_id": "c1"}],
+        )
+
+        result = parse_bytes_with_diagnostics(b"%PDF-1.4", "normal.pdf")
+        assert result["success"] is True
+        assert result["loader_used"] == "PyPDFLoader"
+        assert result["ocr_triggered"] is False
+        assert len(result["documents"]) > 0
+
+    def test_pdf_scanned_triggers_ocr(self, monkeypatch):
+        from document_parser import parse_bytes_with_diagnostics
+
+        monkeypatch.setattr("document_parser._parse_pdf_bytes", lambda content, filename: [])
+        monkeypatch.setattr("document_parser._parse_pdf_with_unstructured_loader", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            "document_parser._parse_pdf_with_ocr",
+            lambda content, filename: [{"text": "OCR extracted text", "source": filename, "page": 1, "chunk_id": "ocr1"}],
+        )
+
+        result = parse_bytes_with_diagnostics(b"%PDF-1.4", "scanned.pdf")
+        assert result["success"] is True
+        assert result["loader_used"] == "OCR"
+        assert result["ocr_triggered"] is True
+        assert "Scanned document detected" in result["status_messages"]
+        assert "Applying OCR..." in result["status_messages"]
+
+    def test_pdf_empty_after_ocr_returns_error(self, monkeypatch):
+        from document_parser import parse_bytes_with_diagnostics
+
+        monkeypatch.setattr("document_parser._parse_pdf_bytes", lambda content, filename: [])
+        monkeypatch.setattr("document_parser._parse_pdf_with_unstructured_loader", lambda *args, **kwargs: [])
+        monkeypatch.setattr("document_parser._parse_pdf_with_ocr", lambda content, filename: [])
+
+        result = parse_bytes_with_diagnostics(b"%PDF-1.4", "empty.pdf")
+        assert result["success"] is False
+        assert result["error_code"] == "NO_READABLE_TEXT"
+        assert "No readable text found" in result["status_messages"]
+
+    def test_pdf_corrupted_handled_gracefully(self, monkeypatch):
+        from document_parser import parse_bytes_with_diagnostics
+
+        monkeypatch.setattr("document_parser._parse_pdf_bytes", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad pdf")))
+        monkeypatch.setattr("document_parser._parse_pdf_with_unstructured_loader", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad unstructured")))
+        monkeypatch.setattr("document_parser._parse_pdf_with_ocr", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad ocr")))
+
+        result = parse_bytes_with_diagnostics(b"not-a-pdf", "corrupt.pdf")
+        assert result["success"] is False
+        assert result["error_code"] == "CORRUPTED_OR_UNREADABLE_PDF"
+
+    def test_pdf_ocr_dependency_missing_reported(self, monkeypatch):
+        from document_parser import parse_bytes_with_diagnostics
+
+        monkeypatch.setattr("document_parser._parse_pdf_bytes", lambda content, filename: [])
+        monkeypatch.setattr("document_parser._parse_pdf_with_unstructured_loader", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            "document_parser._parse_pdf_with_ocr",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("poppler not found")),
+        )
+
+        result = parse_bytes_with_diagnostics(b"%PDF-1.4", "scanned.pdf")
+        assert result["success"] is False
+        assert result["error_code"] == "OCR_DEPENDENCY_MISSING"
+        assert "OCR engine unavailable" in result["status_messages"]
+
 
 class TestHybridRAG:
     """Test hybrid RAG logic."""
@@ -259,3 +328,10 @@ class TestAPI:
         resp = client.post("/chat/stream", json={"question": "What is remote work policy?"})
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers.get("content-type", "")
+
+    def test_chat_no_documents_guard(self, client, monkeypatch):
+        monkeypatch.setattr("main.has_embeddings", lambda: False)
+        resp = client.post("/chat", json={"question": "Any docs?"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["answer"] == "No documents available for this chat"

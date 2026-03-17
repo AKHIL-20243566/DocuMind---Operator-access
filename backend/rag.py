@@ -5,7 +5,7 @@ from vector_store import (
     create_index, add_to_index, remove_by_source, search,
     load_index, get_document_list, get_total_documents
 )
-from document_parser import parse_bytes, is_supported
+from document_parser import parse_bytes_with_diagnostics, is_supported
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,27 @@ def initialize():
 def ingest_file(content: bytes, filename: str) -> dict:
     """Ingest an uploaded file: parse → chunk → embed → index."""
     if not is_supported(filename):
-        return {"success": False, "error": f"Unsupported file type: {filename}"}
+        return {
+            "success": False,
+            "error": f"Unsupported file type: {filename}",
+            "error_code": "UNSUPPORTED_FILE_TYPE",
+            "status_messages": [],
+        }
 
     # Parse file into chunks
-    chunks = parse_bytes(content, filename)
+    parse_result = parse_bytes_with_diagnostics(content, filename)
+    chunks = parse_result.get("documents", [])
+
     if not chunks:
-        return {"success": False, "error": f"No text could be extracted from {filename}"}
+        error_message = parse_result.get("error_message") or f"No text could be extracted from {filename}"
+        return {
+            "success": False,
+            "error": error_message,
+            "error_code": parse_result.get("error_code") or "NO_READABLE_TEXT",
+            "status_messages": parse_result.get("status_messages", []),
+            "loader_used": parse_result.get("loader_used"),
+            "ocr_triggered": parse_result.get("ocr_triggered", False),
+        }
 
     # Remove old version if re-uploading
     remove_by_source(filename)
@@ -54,12 +69,21 @@ def ingest_file(content: bytes, filename: str) -> dict:
     embeddings = embed(texts)
     add_to_index(embeddings, chunks)
 
-    logger.info(f"Ingested '{filename}': {len(chunks)} chunks")
+    logger.info(
+        "Ingested '%s': chunks=%s loader=%s ocr_triggered=%s",
+        filename,
+        len(chunks),
+        parse_result.get("loader_used"),
+        parse_result.get("ocr_triggered", False),
+    )
     return {
         "success": True,
         "filename": filename,
         "chunks": len(chunks),
-        "message": f"Successfully ingested {filename} ({len(chunks)} chunks)"
+        "message": f"Successfully ingested {filename} ({len(chunks)} chunks)",
+        "loader_used": parse_result.get("loader_used"),
+        "ocr_triggered": parse_result.get("ocr_triggered", False),
+        "status_messages": parse_result.get("status_messages", ["Extraction successful"]),
     }
 
 
@@ -83,6 +107,11 @@ def retrieve_context(question, k=3):
 def list_documents():
     """Get a summary of all indexed documents."""
     return get_document_list()
+
+
+def has_embeddings() -> bool:
+    """Check whether any document embeddings exist in the vector store."""
+    return get_total_documents() > 0
 
 
 # Initialize on import

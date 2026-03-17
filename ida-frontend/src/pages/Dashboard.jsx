@@ -100,11 +100,31 @@ function Dashboard() {
     try {
       for (const file of files) {
         const result = await uploadFile(file);
-        setUploadMsg(result.message);
+        const statusMessages = Array.isArray(result.status_messages) ? result.status_messages : [];
+        if (statusMessages.length > 0) {
+          setUploadMsg(`${statusMessages.join(" -> ")} | ${result.message}`);
+        } else {
+          setUploadMsg(result.message);
+        }
       }
       await fetchDocuments();
     } catch (err) {
-      setUploadMsg(err.message);
+      const detail = err?.detail;
+      if (detail && typeof detail === "object") {
+        const statusMessages = Array.isArray(detail.status_messages) ? detail.status_messages : [];
+        if (statusMessages.length > 0) {
+          const base = statusMessages.join(" -> ");
+          if (detail.error) {
+            setUploadMsg(`${base} | ${detail.error}`);
+          } else {
+            setUploadMsg(base);
+          }
+        } else {
+          setUploadMsg(detail.error || "Upload failed");
+        }
+      } else {
+        setUploadMsg(err.message);
+      }
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

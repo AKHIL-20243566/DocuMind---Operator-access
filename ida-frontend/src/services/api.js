@@ -50,7 +50,11 @@ export async function uploadFile(file) {
   });
   if (!response.ok) {
     const err = await response.json();
-    throw new Error(err.detail || "Upload failed");
+    const detail = err?.detail;
+    const message = typeof detail === "string" ? detail : detail?.error || "Upload failed";
+    const error = new Error(message);
+    error.detail = detail;
+    throw error;
   }
   return await response.json();
 }
