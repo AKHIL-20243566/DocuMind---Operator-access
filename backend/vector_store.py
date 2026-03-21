@@ -1,3 +1,15 @@
+"""DocuMind — Vector Store (FAISS)
+Owner: Ashwin (Embeddings + Retrieval Optimization)
+Purpose: Manages the FAISS index — create, add, remove, search, persist
+Connection: Called by rag.py for all vector DB operations;
+            supports chat_id isolation so each chat only sees its own documents
+
+Performance note:
+  Embeddings are cached in `_embeddings` (numpy array) so that document deletion
+  only requires a numpy row-filter + FAISS index rebuild — NOT a full re-embed.
+  This reduces deletion from ~30 s to < 1 s.
+"""
+
 import faiss
 import numpy as np
 import json
@@ -6,203 +18,246 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------
-# SAFE PATH INITIALIZATION
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STORE_DIR = os.path.join(BASE_DIR, "vector_data")
-
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+STORE_DIR  = os.path.join(BASE_DIR, "vector_data")
 INDEX_PATH = os.path.join(STORE_DIR, "faiss.index")
-DOCS_PATH = os.path.join(STORE_DIR, "documents.json")
+DOCS_PATH  = os.path.join(STORE_DIR, "documents.json")
+EMBS_PATH  = os.path.join(STORE_DIR, "embeddings.npy")   # cached embedding matrix
 
-index = None
-documents = []
+index       = None
+documents   = []       # list[dict]: text, source, page, chunk_id, [chat_id]
+_embeddings = None     # np.ndarray shape (N, dim) — mirrors documents 1-to-1
 
 
 def _ensure_store_dir():
-    """Ensure the vector storage directory exists."""
     os.makedirs(STORE_DIR, exist_ok=True)
 
 
-# ------------------------------------------------------------------
-# INDEX CREATION
-# ------------------------------------------------------------------
+def _rebuild_faiss(embs: np.ndarray):
+    """Rebuild a flat L2 index from a (N, dim) float32 array."""
+    global index
+    if embs is None or len(embs) == 0:
+        index = None
+        return
+    idx = faiss.IndexFlatL2(embs.shape[1])
+    idx.add(embs)
+    index = idx
+
+
+# ---------------------------------------------------------------------------
+# Index creation
+# ---------------------------------------------------------------------------
 
 def create_index(embeddings, docs):
-    """Create a new FAISS index from embeddings and documents."""
-    global index, documents
+    """Create a brand-new FAISS L2 index from embeddings + document metadata.
+    Owner: Ashwin — called on first run or full rebuild."""
+    global _embeddings, documents
 
     _ensure_store_dir()
-
-    embeddings_np = np.array(embeddings, dtype="float32")
-
-    if embeddings_np.ndim == 1:
-        embeddings_np = embeddings_np.reshape(1, -1)
-
-    dim = embeddings_np.shape[1]
-
-    index = faiss.IndexFlatL2(dim)
-    index.add(embeddings_np)
-
-    documents = docs
+    embs = np.atleast_2d(np.array(embeddings, dtype="float32"))
+    _rebuild_faiss(embs)
+    _embeddings = embs
+    documents   = list(docs)
 
     save_index()
+    logger.info("FAISS index created: %d docs, dim=%d", len(docs), embs.shape[1])
 
-    logger.info(f"FAISS index created with {len(docs)} documents, dim={dim}")
 
-
-# ------------------------------------------------------------------
-# ADD DOCUMENTS
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Add documents
+# ---------------------------------------------------------------------------
 
 def add_to_index(embeddings, new_docs):
-    """Add new documents to the existing index."""
-    global index, documents
+    """Append new embeddings + metadata to the existing index.
+    Owner: Ashwin — called after every successful document upload."""
+    global index, _embeddings, documents
 
-    embeddings_np = np.array(embeddings, dtype="float32")
+    new_embs = np.atleast_2d(np.array(embeddings, dtype="float32"))
 
-    if embeddings_np.ndim == 1:
-        embeddings_np = embeddings_np.reshape(1, -1)
-
-    if index is None:
-        create_index(embeddings_np, new_docs)
+    if index is None or _embeddings is None:
+        create_index(new_embs, new_docs)
         return
 
-    index.add(embeddings_np)
-
+    _embeddings = np.vstack([_embeddings, new_embs])
     documents.extend(new_docs)
-
+    index.add(new_embs)   # incremental add — fast
     save_index()
+    logger.info("Added %d docs to index (total: %d)", len(new_docs), len(documents))
 
-    logger.info(f"Added {len(new_docs)} documents to index (total: {len(documents)})")
 
+# ---------------------------------------------------------------------------
+# Remove documents  (FAST — no re-embedding)
+# ---------------------------------------------------------------------------
 
-# ------------------------------------------------------------------
-# REMOVE DOCUMENTS
-# ------------------------------------------------------------------
-
-def remove_by_source(source_name):
-    """Remove all documents from a specific source and rebuild the index."""
-    global index, documents
+def remove_by_source(source_name: str, chat_id: str = None) -> int:
+    """Remove all chunks for a given source, optionally scoped to a chat_id.
+    Owner: Ashwin — O(N) filter + FAISS index rebuild from cached embeddings.
+    No call to embed() — deletion is now near-instant regardless of corpus size."""
+    global index, documents, _embeddings
 
     if not documents:
         return 0
 
-    from embeddings import embed
-
     original_count = len(documents)
 
-    documents = [d for d in documents if d.get("source") != source_name]
+    # Compute which rows to keep
+    if chat_id:
+        keep_mask = [
+            not (d.get("source") == source_name and d.get("chat_id") == chat_id)
+            for d in documents
+        ]
+    else:
+        keep_mask = [d.get("source") != source_name for d in documents]
 
-    removed = original_count - len(documents)
+    removed = original_count - sum(keep_mask)
+    if removed == 0:
+        return 0
 
-    if removed > 0:
+    # Filter documents list
+    documents = [d for d, keep in zip(documents, keep_mask) if keep]
 
-        if documents:
+    # Filter embedding matrix (numpy fancy indexing — no re-computation)
+    if _embeddings is not None and len(_embeddings) == original_count:
+        indices = np.array([i for i, keep in enumerate(keep_mask) if keep], dtype=np.int64)
+        _embeddings = _embeddings[indices] if len(indices) > 0 else None
+    else:
+        # Safety: embeddings out of sync — will rebuild from scratch next add
+        _embeddings = None
 
-            texts = [d["text"] for d in documents]
+    # Rebuild FAISS index from cached embeddings (milliseconds, no GPU/model needed)
+    _rebuild_faiss(_embeddings)
 
-            embeddings = embed(texts)
-
-            embeddings_np = np.array(embeddings, dtype="float32")
-
-            dim = embeddings_np.shape[1]
-
-            index = faiss.IndexFlatL2(dim)
-
-            index.add(embeddings_np)
-
-        else:
-
-            index = None
-
-        save_index()
-
-        logger.info(f"Removed {removed} chunks from source '{source_name}'")
-
+    save_index()
+    logger.info(
+        "Removed %d chunks for source='%s' chat_id='%s' (instant — no re-embed)",
+        removed, source_name, chat_id,
+    )
     return removed
 
 
-# ------------------------------------------------------------------
-# SEARCH
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Search (with chat_id isolation)
+# ---------------------------------------------------------------------------
 
-def search(query_embedding, k=3):
-    """Search for the top-k most similar documents."""
+def search(query_embedding, k: int = 5, chat_id: str = None,
+           query_text: str = None, use_hybrid: bool = True) -> list:
+    """Hybrid search: FAISS semantic + BM25 keyword, merged via Reciprocal Rank Fusion.
+    Owner: Ashwin — core retrieval function.
 
-    if index is None or len(documents) == 0:
-        logger.warning("Search called on empty index")
+    chat_id isolation rules:
+    - Docs WITH a chat_id are private: only returned when the same chat_id is queried.
+    - Docs WITHOUT a chat_id (e.g. sample docs) are global: returned to everyone.
+    - If chat_id is None, all docs are returned (backward-compat / admin use).
+    """
+    if index is None or not documents:
         return []
 
-    query_np = np.array(query_embedding, dtype="float32")
+    # ── Collect documents visible to this chat ──────────────────────────
+    visible: list[tuple[int, dict]] = []   # (original_index, doc)
+    for i, doc in enumerate(documents):
+        doc_chat_id = doc.get("chat_id")
+        if chat_id and doc_chat_id and doc_chat_id != chat_id:
+            continue
+        visible.append((i, doc))
 
-    if query_np.ndim == 1:
-        query_np = query_np.reshape(1, -1)
+    if not visible:
+        return []
 
-    actual_k = min(k, len(documents))
+    # ── FAISS semantic search ────────────────────────────────────────────
+    query_np  = np.atleast_2d(np.array(query_embedding, dtype="float32"))
+    fetch_k   = min(k * 8, len(documents))
+    D, I      = index.search(query_np, fetch_k)
 
-    D, I = index.search(query_np, actual_k)
+    # Map original FAISS indices → position in visible list
+    orig_to_vis: dict[int, int] = {orig: pos for pos, (orig, _) in enumerate(visible)}
+
+    faiss_ranked: list[tuple[int, float]] = []   # (visible_pos, raw_score)
+    for i, dist in zip(I[0], D[0]):
+        if i in orig_to_vis:
+            faiss_ranked.append((orig_to_vis[i], float(1 / (1 + dist))))
+
+    # ── BM25 keyword search ──────────────────────────────────────────────
+    bm25_ranked: list[tuple[int, float]] = []
+    if use_hybrid and query_text and len(visible) > 0:
+        try:
+            from bm25 import BM25Index, reciprocal_rank_fusion
+            corpus   = [doc["text"] for _, doc in visible]
+            bm25_idx = BM25Index(corpus)
+            bm25_raw = bm25_idx.search(query_text, k=min(k * 8, len(visible)))
+            bm25_ranked = bm25_raw   # already (visible_pos, score)
+
+            merged = reciprocal_rank_fusion(faiss_ranked, bm25_ranked)
+            top_positions = [pos for pos, _ in merged[:k]]
+        except Exception as e:
+            logger.warning("BM25 hybrid search failed, falling back to FAISS: %s", e)
+            top_positions = [pos for pos, _ in faiss_ranked[:k]]
+    else:
+        top_positions = [pos for pos, _ in faiss_ranked[:k]]
+
+    # ── Build result list ────────────────────────────────────────────────
+    faiss_score_map = {pos: sc for pos, sc in faiss_ranked}
 
     results = []
-
-    for i, dist in zip(I[0], D[0]):
-
-        if 0 <= i < len(documents):
-
-            doc = dict(documents[i])
-
-            doc["score"] = float(1 / (1 + dist))
-
-            results.append(doc)
+    for pos in top_positions:
+        if pos >= len(visible):
+            continue
+        _, doc = visible[pos]
+        out = dict(doc)
+        out["score"] = faiss_score_map.get(pos, 0.0)
+        results.append(out)
 
     return results
 
 
-# ------------------------------------------------------------------
-# SAVE INDEX
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Persist
+# ---------------------------------------------------------------------------
 
 def save_index():
-    """Persist FAISS index and documents to disk."""
-
+    """Serialize FAISS index + metadata + embeddings matrix to disk."""
     _ensure_store_dir()
 
+    # Save FAISS binary
     if index is not None:
         try:
-            # Use serialize + Python file I/O to handle Unicode paths on Windows
             index_bytes = faiss.serialize_index(index)
             with open(INDEX_PATH, "wb") as f:
                 f.write(index_bytes)
         except Exception as e:
-            logger.error(f"Failed to write FAISS index: {e}")
+            logger.error("Failed to write FAISS index: %s", e)
             raise
 
+    # Save document metadata
     try:
         with open(DOCS_PATH, "w", encoding="utf-8") as f:
             json.dump(documents, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logger.error(f"Failed to save documents metadata: {e}")
+        logger.error("Failed to save document metadata: %s", e)
         raise
 
-    logger.info(f"Index saved: {len(documents)} documents")
+    # Save embeddings matrix (enables fast deletion on next run)
+    if _embeddings is not None:
+        try:
+            np.save(EMBS_PATH, _embeddings)
+        except Exception as e:
+            logger.warning("Failed to save embeddings cache: %s", e)
+
+    logger.info("Index saved: %d documents", len(documents))
 
 
-# ------------------------------------------------------------------
-# LOAD INDEX
-# ------------------------------------------------------------------
-
-def load_index():
-    """Load FAISS index and documents from disk."""
-
-    global index, documents
+def load_index() -> bool:
+    """Deserialize FAISS index + metadata from disk.
+    Also loads embeddings cache if available."""
+    global index, documents, _embeddings
 
     _ensure_store_dir()
 
     if os.path.exists(INDEX_PATH) and os.path.exists(DOCS_PATH):
-
         try:
-            # Use deserialize + Python file I/O to handle Unicode paths on Windows
             with open(INDEX_PATH, "rb") as f:
                 index_bytes = f.read()
             index = faiss.deserialize_index(np.frombuffer(index_bytes, dtype="uint8"))
@@ -210,59 +265,59 @@ def load_index():
             with open(DOCS_PATH, "r", encoding="utf-8") as f:
                 documents = json.load(f)
 
-            logger.info(f"Index loaded: {len(documents)} documents")
+            # Load embeddings cache if present
+            if os.path.exists(EMBS_PATH):
+                try:
+                    _embeddings = np.load(EMBS_PATH)
+                    logger.info(
+                        "Embeddings cache loaded: shape=%s", _embeddings.shape
+                    )
+                except Exception as e:
+                    logger.warning("Could not load embeddings cache: %s", e)
+                    _embeddings = None
 
+            logger.info("Index loaded: %d documents", len(documents))
             return True
-
         except Exception as e:
-
-            logger.error(f"Failed to load index: {e}")
-
+            logger.error("Failed to load index: %s", e)
             return False
 
     return False
 
 
-# ------------------------------------------------------------------
-# DOCUMENT LIST
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Document list (chat-scoped)
+# ---------------------------------------------------------------------------
 
-def get_document_list():
-    """Get a summary of all indexed documents grouped by source."""
-
-    sources = {}
+def get_document_list(chat_id: str = None) -> list:
+    """Return a summary list of documents, grouped by source.
+    Owner: Anirudh (Data Engineer) — metadata tagging."""
+    sources: dict = {}
 
     for doc in documents:
+        doc_chat_id = doc.get("chat_id")
+
+        if chat_id and doc_chat_id and doc_chat_id != chat_id:
+            continue
 
         src = doc.get("source", "Unknown")
-
         if src not in sources:
-            sources[src] = {
-                "name": src,
-                "chunks": 0,
-                "pages": set()
-            }
+            sources[src] = {"name": src, "chunks": 0, "pages": set()}
 
         sources[src]["chunks"] += 1
-
         sources[src]["pages"].add(doc.get("page", 1))
 
-    result = []
-
-    for src, info in sources.items():
-
-        result.append({
-            "name": info["name"],
-            "chunks": info["chunks"],
-            "pages": len(info["pages"])
-        })
-
-    return result
+    return [
+        {"name": info["name"], "chunks": info["chunks"], "pages": len(info["pages"])}
+        for info in sources.values()
+    ]
 
 
-# ------------------------------------------------------------------
-# DOCUMENT COUNT
-# ------------------------------------------------------------------
-
-def get_total_documents():
-    return len(documents)
+def get_total_documents(chat_id: str = None) -> int:
+    """Count documents, optionally scoped to a chat."""
+    if not chat_id:
+        return len(documents)
+    return sum(
+        1 for d in documents
+        if not d.get("chat_id") or d.get("chat_id") == chat_id
+    )

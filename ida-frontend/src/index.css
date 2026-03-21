@@ -1,4 +1,7 @@
-/* DocuMind — Base Reset */
+/* DocuMind — Base Reset
+   Owner: Akhil (Frontend Lead)
+   Purpose: Minimal reset. Theme colors come from CSS custom properties in App.css.
+            color-scheme is intentionally NOT hardcoded dark so light mode works. */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -8,9 +11,6 @@
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: dark;
-  color: #d1d5db;
-  background-color: #0c0d11;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -24,18 +24,10 @@ body {
   min-height: 100vh;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
-}
+h1, h2, h3, h4, h5, h6 { margin: 0; }
 
-a {
-  color: #818cf8;
-  text-decoration: none;
-}
-
-a:hover {
-  color: #a5b4fc;
-}
+a { color: var(--accent, #0066FF); text-decoration: none; }
+a:hover { opacity: 0.8; }
 
 button {
   font-family: inherit;
@@ -43,6 +35,6 @@ button {
 }
 
 button:focus-visible {
-  outline: 2px solid #4338ca;
+  outline: 2px solid var(--accent, #0066FF);
   outline-offset: 2px;
 }

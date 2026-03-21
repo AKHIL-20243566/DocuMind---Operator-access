@@ -1,3 +1,11 @@
+/**
+ * DocuMind — ChatBox Component
+ * Owner: Akhil (Frontend Lead)
+ * Purpose: Text input + send button at the bottom of the chat area.
+ *          Submits on Enter or click; auto-focuses after each send.
+ * Connection: Used by Dashboard.jsx; calls onSend(question) prop.
+ */
+
 import { useState, useRef, useEffect } from "react";
 import { ArrowRight } from "lucide-react";
 function ChatBox({ onSend, loading }) {

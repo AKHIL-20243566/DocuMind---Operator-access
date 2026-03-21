@@ -1,6 +1,10 @@
-# ============================================
+# ============================================================
 # DocuMind — Docker Compose
-# ============================================
+# Owner: Aaron (Backend) + Akhil (Frontend)
+# Purpose: Orchestrates backend (FastAPI), frontend (React/Vite),
+#          and Ollama (LLM inference) services
+# ============================================================
+
 version: "3.8"
 
 services:
@@ -11,9 +15,18 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Ollama connection
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3
+      # RAG tuning
       - RELEVANCE_THRESHOLD=0.3
+      # Auth — CHANGE THIS IN PRODUCTION
+      - JWT_SECRET_KEY=change-this-to-a-long-random-secret-in-production
+      - TOKEN_EXPIRY_HOURS=24
+      # Security — 5 requests per minute per IP
+      - RATE_LIMIT_PER_MINUTE=5
+      # API key auth (optional — leave empty to disable)
+      - DOCUMIND_API_KEY=
     volumes:
       - vector_data:/app/vector_data
     depends_on:

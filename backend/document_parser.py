@@ -108,6 +108,8 @@ def parse_bytes_with_diagnostics(content: bytes, filename: str) -> dict:
     try:
         if ext == ".pdf":
             return _parse_pdf_bytes_with_fallback(content, filename)
+        elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"):
+            return _parse_image_bytes_with_diagnostics(content, filename)
         elif ext == ".docx":
             documents = _parse_docx_bytes(content, filename)
         elif ext == ".txt":
@@ -160,6 +162,91 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]
         chunks.append(text[start:end].strip())
         start = end - overlap
     return [c for c in chunks if c]
+
+
+# --- Image OCR (PNG / JPG / TIFF / BMP) ---
+
+def _parse_image_bytes_with_diagnostics(content: bytes, filename: str) -> dict:
+    """OCR a raw image file and return diagnostics.
+    Owner: Anirudh (Data Engineer) — direct image ingestion pipeline.
+    Supports PNG, JPG, JPEG, TIFF, BMP, WEBP via pytesseract + Pillow.
+    """
+    diagnostics = {
+        "success": False,
+        "documents": [],
+        "loader_used": "ImageOCR",
+        "ocr_triggered": True,
+        "error_code": None,
+        "error_message": None,
+        "status_messages": ["Image detected", "Applying OCR..."],
+    }
+
+    try:
+        import pytesseract
+        from PIL import Image
+
+        tesseract_cmd = _find_tesseract_cmd()
+        if tesseract_cmd and tesseract_cmd != "tesseract":
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+        # Force a clear error early if Tesseract is missing
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception as exc:
+            raise RuntimeError(
+                "tesseract not found. Install Tesseract OCR and ensure tesseract.exe is in PATH."
+            ) from exc
+
+        image = Image.open(io.BytesIO(content))
+        # Convert to RGB so tesseract handles all modes (RGBA, palette, etc.)
+        image = image.convert("RGB")
+
+        text = pytesseract.image_to_string(image) or ""
+        chunks = chunk_text(text)
+
+        if not chunks:
+            diagnostics.update({
+                "error_code": "NO_READABLE_TEXT",
+                "error_message": f"No readable text found in image {filename}",
+                "status_messages": diagnostics["status_messages"] + ["No readable text found"],
+            })
+            logger.error("Image OCR found no text | file=%s", filename)
+            return diagnostics
+
+        documents = [
+            {
+                "text": chunk,
+                "source": filename,
+                "page": 1,
+                "chunk_id": f"{filename}_ocr_c{i}",
+            }
+            for i, chunk in enumerate(chunks)
+        ]
+
+        diagnostics.update({
+            "success": True,
+            "documents": documents,
+            "status_messages": diagnostics["status_messages"] + ["Extraction successful"],
+        })
+        logger.info("Image OCR success | file=%s chunks=%d", filename, len(documents))
+        return diagnostics
+
+    except Exception as exc:
+        error_text = str(exc).lower()
+        is_dep_error = "tesseract" in error_text or "not found" in error_text or "pillow" in error_text
+
+        if is_dep_error:
+            diagnostics["error_code"] = "OCR_DEPENDENCY_MISSING"
+            diagnostics["error_message"] = (
+                "OCR engine unavailable. Install Tesseract OCR + Pillow and ensure tesseract.exe is in PATH."
+            )
+        else:
+            diagnostics["error_code"] = "IMAGE_PARSE_FAILURE"
+            diagnostics["error_message"] = f"Failed to process image {filename}: {exc}"
+
+        diagnostics["status_messages"].append("OCR failed")
+        logger.error("Image OCR failure | file=%s error=%s", filename, exc)
+        return diagnostics
 
 
 # --- PDF ---
@@ -502,7 +589,11 @@ def _csv_to_chunks(file_obj, filename: str) -> list[dict]:
 
 # --- Supported formats ---
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv", ".md", ".markdown"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".csv", ".md", ".markdown",
+    # Image formats — OCR via pytesseract + Pillow
+    ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp",
+}
 
 def is_supported(filename: str) -> bool:
     ext = os.path.splitext(filename)[1].lower()

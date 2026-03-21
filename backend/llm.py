@@ -1,3 +1,11 @@
+"""DocuMind — LLM Integration (Ollama)
+Owner: Aaron (Backend RAG Engineer)
+Purpose: Builds prompts, calls Ollama for streaming/non-streaming generation,
+         enforces STRICT RAG mode (answers only from document context),
+         and provides fallback when Ollama is unavailable
+Connection: Called by main.py for /chat and /chat/stream endpoints
+"""
+
 import requests
 import json
 import os
@@ -5,109 +13,138 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_BASE     = os.getenv("OLLAMA_URL",   "http://127.0.0.1:11434")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3")
 OLLAMA_GENERATE = f"{OLLAMA_BASE}/api/generate"
-OLLAMA_TAGS = f"{OLLAMA_BASE}/api/tags"
+OLLAMA_TAGS     = f"{OLLAMA_BASE}/api/tags"
 
-# Relevance threshold for hybrid logic
-RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.3"))
+# Relevance threshold: docs with score below this are not used as context
+# Lowered to 0.2 so scanned/OCR PDFs (which score lower) still get used
+RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.2"))
 
 _ollama_status = None
 
 
-def check_ollama():
-    """Check if Ollama is running and return status info."""
+# ---------------------------------------------------------------------------
+# Ollama health
+# ---------------------------------------------------------------------------
+
+def check_ollama() -> dict:
+    """Ping Ollama and return {available, models}.
+    Tries OLLAMA_TAGS first; if that fails and the URL uses 'localhost',
+    retries with '127.0.0.1' to work around Windows DNS resolution quirks."""
     global _ollama_status
-    try:
-        resp = requests.get(OLLAMA_TAGS, timeout=5)
-        if resp.status_code == 200:
-            models = [m["name"] for m in resp.json().get("models", [])]
-            _ollama_status = {"available": True, "models": models}
-            return _ollama_status
-    except Exception:
-        pass
+
+    def _try_url(url: str):
+        try:
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200:
+                return resp.json().get("models", [])
+        except Exception:
+            pass
+        return None
+
+    models_raw = _try_url(OLLAMA_TAGS)
+
+    if models_raw is not None:
+        models = [m["name"] for m in models_raw]
+        _ollama_status = {"available": True, "models": models}
+        return _ollama_status
+
     _ollama_status = {"available": False, "models": []}
     return _ollama_status
 
 
-def is_ollama_available():
-    if _ollama_status is None:
-        check_ollama()
-    return _ollama_status.get("available", False)
+def is_ollama_available() -> bool:
+    """Always do a fresh check so the backend picks up Ollama if it starts later."""
+    return check_ollama().get("available", False)
 
 
-def build_hybrid_prompt(question, context_docs, use_context=True):
-    """Build a prompt with hybrid RAG logic."""
+# ---------------------------------------------------------------------------
+# Prompt builder — STRICT RAG mode
+# Owner: Aaron + Aditya (Evaluation & Metrics — ensures answer grounding)
+# ---------------------------------------------------------------------------
+
+def build_strict_rag_prompt(question: str, context_docs: list, use_context: bool) -> str:
+    """Build the LLM prompt.
+
+    STRICT RAG mode: when context is available, the model MUST answer only
+    from the retrieved documents. If the answer is not in the docs, it must
+    say so explicitly — no hallucination allowed.
+    """
     if use_context and context_docs:
         context_text = "\n\n".join(
             f"[Source: {doc.get('source', 'Unknown')}, Page {doc.get('page', '?')}]\n{doc['text']}"
             for doc in context_docs
         )
-        return f"""You are DocuMind, an intelligent AI knowledge assistant.
+        return f"""You are a precise enterprise documentation assistant called DocuMind.
 
-You have access to the following retrieved documents. Use them to answer the question when relevant.
-If the documents contain the answer, cite the source.
-If the documents do NOT contain the answer, use your own knowledge to provide a helpful response.
-Always be accurate, concise, and professional.
+STRICT RULES:
+1. Answer ONLY from the retrieved context below. Do NOT use outside knowledge.
+2. If the answer is not found in the context, respond with exactly:
+   "This information is not found in the available documents."
+3. Keep answers concise and professional (2-4 sentences unless detail is required).
+4. Always cite the source document and page number when possible.
 
 ---
-Retrieved Documents:
+Retrieved Context:
 {context_text}
 ---
 
 Question: {question}
 
 Answer:"""
-    else:
-        return f"""You are DocuMind, an intelligent AI knowledge assistant.
 
-No relevant documents were found for this question. Answer using your general knowledge.
-Be helpful, accurate, and concise.
+    else:
+        # No relevant context found — inform user
+        return f"""You are DocuMind, an enterprise document assistant.
+
+No relevant documents were found for this query.
+Respond with: "This information is not found in the available documents. Please upload relevant documentation."
 
 Question: {question}
 
 Answer:"""
 
 
-def generate_answer(question, context_docs, use_context=True):
-    """Generate an answer using Ollama with hybrid RAG logic."""
-    prompt = build_hybrid_prompt(question, context_docs, use_context)
+# ---------------------------------------------------------------------------
+# Non-streaming generation
+# ---------------------------------------------------------------------------
+
+def generate_answer(question: str, context_docs: list, use_context: bool = True) -> str:
+    """Call Ollama synchronously and return the full answer string."""
+    prompt = build_strict_rag_prompt(question, context_docs, use_context)
 
     try:
         response = requests.post(
             OLLAMA_GENERATE,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=120
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120,
         )
         response.raise_for_status()
         return response.json()["response"]
     except requests.ConnectionError:
-        logger.warning("Ollama not available, using fallback")
+        logger.warning("Ollama unavailable — using fallback response")
         return _fallback_answer(question, context_docs, use_context)
     except Exception as e:
-        logger.error(f"LLM error: {e}")
+        logger.error("LLM error: %s", e)
         return _fallback_answer(question, context_docs, use_context)
 
 
-def generate_answer_stream(question, context_docs, use_context=True):
-    """Generate a streaming answer from Ollama. Yields text chunks."""
-    prompt = build_hybrid_prompt(question, context_docs, use_context)
+# ---------------------------------------------------------------------------
+# Streaming generation
+# ---------------------------------------------------------------------------
+
+def generate_answer_stream(question: str, context_docs: list, use_context: bool = True):
+    """Call Ollama with streaming=True. Yields text tokens one at a time."""
+    prompt = build_strict_rag_prompt(question, context_docs, use_context)
 
     try:
         response = requests.post(
             OLLAMA_GENERATE,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": True
-            },
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": True},
             timeout=120,
-            stream=True
+            stream=True,
         )
         response.raise_for_status()
 
@@ -119,24 +156,35 @@ def generate_answer_stream(question, context_docs, use_context=True):
                     yield token
                 if data.get("done", False):
                     break
+
     except requests.ConnectionError:
-        logger.warning("Ollama not available for streaming, using fallback")
+        logger.warning("Ollama unavailable for streaming — using fallback")
         yield _fallback_answer(question, context_docs, use_context)
     except Exception as e:
-        logger.error(f"LLM streaming error: {e}")
+        logger.error("LLM streaming error: %s", e)
         yield _fallback_answer(question, context_docs, use_context)
 
 
-def should_use_context(retrieved_docs):
-    """Determine if retrieved documents are relevant enough to use."""
+# ---------------------------------------------------------------------------
+# Relevance check
+# Owner: Aditya (Evaluation & Metrics) — thresholding for hallucination control
+# ---------------------------------------------------------------------------
+
+def should_use_context(retrieved_docs: list) -> bool:
+    """Return True only if at least one retrieved doc clears the relevance threshold.
+    Prevents the model from using low-quality, irrelevant context."""
     if not retrieved_docs:
         return False
     top_score = max(doc.get("score", 0) for doc in retrieved_docs)
     return top_score >= RELEVANCE_THRESHOLD
 
 
-def _fallback_answer(question, context_docs, use_context):
-    """Fallback when Ollama is not available."""
+# ---------------------------------------------------------------------------
+# Fallback (Ollama offline)
+# ---------------------------------------------------------------------------
+
+def _fallback_answer(question: str, context_docs: list, use_context: bool) -> str:
+    """Return a formatted fallback when Ollama is not running."""
     if use_context and context_docs:
         context_text = "\n\n".join(
             f"- **{doc.get('source', 'Unknown')}** (p.{doc.get('page', '?')}): {doc['text']}"
@@ -144,10 +192,9 @@ def _fallback_answer(question, context_docs, use_context):
         )
         return (
             f"Based on the retrieved documents:\n\n{context_text}\n\n"
-            "---\n*Running in fallback mode. Connect Ollama for AI-generated answers.*"
+            "---\n*Ollama LLM is offline. Showing raw retrieved context.*"
         )
     return (
-        "I can search your uploaded documents for answers. "
-        "Please upload relevant documents or connect Ollama for general AI responses.\n\n"
-        "---\n*Ollama LLM is not connected.*"
+        "This information is not found in the available documents.\n\n"
+        "---\n*Ollama LLM is offline. Upload relevant documents to get context-based answers.*"
     )

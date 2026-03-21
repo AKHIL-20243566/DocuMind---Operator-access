@@ -1,4 +1,8 @@
-"""Security middleware — prompt injection defense, rate limiting, API key auth, query logging."""
+"""DocuMind — Security Middleware
+Owner: Aaron (Backend RAG Engineer + Cybersecurity)
+Purpose: Prompt injection defense, rate limiting (5 req/min), API key auth, audit logging
+Connection: Imported by main.py and applied to all /chat and /upload endpoints
+"""
 
 import os
 import re
@@ -14,7 +18,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 API_KEY = os.getenv("DOCUMIND_API_KEY", "")  # empty = auth disabled
-RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+# Strict rate limit: 5 requests per minute per IP (security requirement)
+RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 
 # ---------------------------------------------------------------------------
 # Prompt injection detection

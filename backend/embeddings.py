@@ -1,3 +1,11 @@
+"""DocuMind — Embeddings Module
+Owner: Ashwin (Embeddings + Retrieval Optimization)
+Purpose: Wraps sentence-transformers (all-MiniLM-L6-v2, 384-dim) with lazy loading
+         and MD5-keyed in-memory cache to avoid re-embedding repeated texts.
+Connection: Called by rag.py (ingest_file + retrieve_context) and vector_store.py
+            (remove_by_source rebuild). Use embed_cached() for query embeddings.
+"""
+
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import logging

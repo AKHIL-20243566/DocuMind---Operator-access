@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(ffmpeg -i \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\animation feature.mp4\" -vf \"fps=1\" -frames:v 6 \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\frame_%02d.png\" -y)"
+    ]
+  }
+}
