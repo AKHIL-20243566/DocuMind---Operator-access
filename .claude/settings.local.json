@@ -6,7 +6,9 @@
       "Bash(curl -s http://localhost:8000/health)",
       "Bash(pip install:*)",
       "Bash(python -c \":*)",
-      "Bash(ffmpeg -i \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\animation feature.mp4\" -vf \"fps=1\" -frames:v 6 \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\frame_%02d.png\" -y)"
+      "Bash(ffmpeg -i \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\animation feature.mp4\" -vf \"fps=1\" -frames:v 6 \"c:\\\\Users\\\\spakh\\\\OneDrive\\\\Документы\\\\GitHub\\\\DocuMind---Operator-access\\\\video\\\\frame_%02d.png\" -y)",
+      "Bash(.venv/Scripts/python.exe --version)",
+      "Bash(py --version)"
     ]
   }
 }

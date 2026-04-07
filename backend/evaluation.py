@@ -6,7 +6,9 @@ Connection: Called by main.py /metrics endpoint; operates on retrieval results
             from rag.py (retrieve_context).
 """
 
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,10 @@ class EvalReport:
     min_score: float
     hallucination_risk: str   # "low" | "medium" | "high"
     sources: list[str] = field(default_factory=list)
+    # LLM-as-judge fields (populated by llm_judge(), None if not run)
+    llm_relevance_score:    float | None = None
+    llm_faithfulness_score: float | None = None
+    llm_judge_reasoning:    str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -153,3 +159,72 @@ def evaluate_retrieval(
         hallucination_risk = risk,
         sources         = list(dict.fromkeys(retrieved_names)),   # deduped, ordered
     )
+
+
+# ---------------------------------------------------------------------------
+# LLM-as-Judge
+# ---------------------------------------------------------------------------
+
+def llm_judge(question: str, answer: str, context_chunks: list[dict]) -> dict:
+    """Call Ollama to rate the answer on relevance and faithfulness.
+
+    Why a separate endpoint (not inline with /chat):
+    - LLM judge adds 2–5 s latency — should not slow down the chat flow.
+    - Called explicitly via POST /evaluate for offline quality assessment.
+
+    Returns:
+        {
+            "llm_relevance_score":    float 0.0–1.0  (or None on failure),
+            "llm_faithfulness_score": float 0.0–1.0  (or None on failure),
+            "llm_judge_reasoning":    str             (or None on failure),
+        }
+    """
+    import requests as _requests
+
+    OLLAMA_BASE  = os.getenv("OLLAMA_URL",   "http://127.0.0.1:11434")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+
+    context_text = "\n\n".join(
+        f"[Source: {c.get('source', '?')}, Section: {c.get('section', 'body')}]\n"
+        f"{c.get('text', '')[:500]}"
+        for c in context_chunks[:5]
+    )
+
+    prompt = (
+        "You are an evaluation judge for a RAG (Retrieval-Augmented Generation) system.\n"
+        "Rate the following answer on two dimensions (scale 0–10):\n"
+        "  Relevance:    Does the answer address the question asked?\n"
+        "  Faithfulness: Is the answer grounded in and supported by the provided context?\n\n"
+        f"Context:\n{context_text}\n\n"
+        f"Question: {question}\n\n"
+        f"Answer: {answer}\n\n"
+        "Output ONLY a JSON object with these exact keys:\n"
+        '{"relevance": <0-10>, "faithfulness": <0-10>, "reasoning": "<one sentence>"}'
+    )
+
+    try:
+        resp = _requests.post(
+            f"{OLLAMA_BASE}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("response", "")
+
+        start = raw.find("{")
+        end   = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            data = json.loads(raw[start:end])
+            return {
+                "llm_relevance_score":    round(min(10.0, max(0.0, float(data.get("relevance",    5)))) / 10, 2),
+                "llm_faithfulness_score": round(min(10.0, max(0.0, float(data.get("faithfulness", 5)))) / 10, 2),
+                "llm_judge_reasoning":    str(data.get("reasoning", "")),
+            }
+    except Exception as e:
+        logger.warning("LLM judge call failed: %s", e)
+
+    return {
+        "llm_relevance_score":    None,
+        "llm_faithfulness_score": None,
+        "llm_judge_reasoning":    None,
+    }

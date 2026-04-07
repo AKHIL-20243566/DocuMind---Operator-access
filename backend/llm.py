@@ -24,6 +24,27 @@ RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.2"))
 
 _ollama_status = None
 
+# ---------------------------------------------------------------------------
+# Research-paper domain instructions
+# Activated when retrieved chunks carry doc_type="research_paper"
+# ---------------------------------------------------------------------------
+
+_RESEARCH_PAPER_INSTRUCTIONS = (
+    "- Reference the specific section when citing information "
+    "(e.g., 'According to the Methodology section...').\n"
+    "- Quote specific metric values and numbers when discussing results.\n"
+    "- Distinguish between the paper's claims and your interpretation.\n"
+    "- When describing methods, use the exact technique name from the paper."
+)
+
+
+def _detect_doc_type(context_docs: list) -> str:
+    """Return the primary doc_type from context chunks."""
+    for doc in context_docs:
+        if doc.get("doc_type") == "research_paper":
+            return "research_paper"
+    return "general"
+
 
 # ---------------------------------------------------------------------------
 # Ollama health
@@ -73,10 +94,22 @@ def build_strict_rag_prompt(question: str, context_docs: list, use_context: bool
     say so explicitly — no hallucination allowed.
     """
     if use_context and context_docs:
-        context_text = "\n\n".join(
-            f"[Source: {doc.get('source', 'Unknown')}, Page {doc.get('page', '?')}]\n{doc['text']}"
-            for doc in context_docs
-        )
+        # Build context lines — include section label when available
+        context_parts = []
+        for doc in context_docs:
+            source_label = f"[Source: {doc.get('source', 'Unknown')}, Page {doc.get('page', '?')}"
+            if doc.get("section"):
+                source_label += f", Section: {doc['section'].replace('_', ' ').title()}"
+            source_label += "]"
+            context_parts.append(f"{source_label}\n{doc['text']}")
+        context_text = "\n\n".join(context_parts)
+
+        # Add domain-specific instructions for research papers
+        doc_type = _detect_doc_type(context_docs)
+        domain_block = ""
+        if doc_type == "research_paper":
+            domain_block = f"\nDOMAIN INSTRUCTIONS (research paper):\n{_RESEARCH_PAPER_INSTRUCTIONS}\n"
+
         return f"""You are a precise enterprise documentation assistant called DocuMind.
 
 STRICT RULES:
@@ -85,7 +118,7 @@ STRICT RULES:
    "This information is not found in the available documents."
 3. Keep answers concise and professional (2-4 sentences unless detail is required).
 4. Always cite the source document and page number when possible.
-
+{domain_block}
 ---
 Retrieved Context:
 {context_text}

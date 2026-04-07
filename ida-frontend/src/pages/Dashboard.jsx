@@ -320,8 +320,8 @@ export default function Dashboard({ user, theme, onToggleTheme, onLogout }) {
             ? <Sun  size={22} strokeWidth={2} />
             : <Moon size={22} strokeWidth={2} />}
         </button>
-        {/* Settings */}
-        <button className="rail-btn" onClick={openSettings} title="Settings">
+        {/* Settings — pushed to bottom of rail via margin-top: auto */}
+        <button className="rail-btn" onClick={openSettings} title="Settings" style={{ marginTop: "auto" }}>
           <Settings size={22} strokeWidth={2} />
         </button>
       </div>

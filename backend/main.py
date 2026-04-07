@@ -15,6 +15,7 @@ load_dotenv()
 
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,7 +29,7 @@ from security import (
     check_rate_limit, verify_api_key, log_query,
 )
 from auth import signup, login, verify_token_from_request
-from evaluation import evaluate_retrieval
+from evaluation import evaluate_retrieval, llm_judge
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,6 +80,13 @@ class EvalRequest(BaseModel):
     question: str
     chat_id: str | None = None
     relevant_docs: list[str] | None = None   # ground-truth doc names (optional)
+
+
+class EvaluateRequest(BaseModel):
+    question: str
+    answer: str | None = None       # if provided, LLM-as-judge is run
+    chat_id: str | None = None
+    relevant_docs: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +196,34 @@ def chat(q: Question, request: Request):
         use_context = should_use_context(retrieved_docs)
         answer = generate_answer(question, retrieved_docs, use_context)
 
-        sources    = _build_sources(retrieved_docs, use_context)
+        # Compute confidence before validator so Strategist can use it
         scores     = [d.get("score", 0) for d in retrieved_docs]
         confidence = _compute_confidence(scores)
+
+        # Auditor + Strategist: check grounding and retry once with a broader query
+        if use_context:
+            try:
+                from validator import check_answer_grounded, should_retry_retrieval
+                grounding = check_answer_grounded(answer, retrieved_docs)
+                if not grounding["grounded"]:
+                    should_retry, refined_q = should_retry_retrieval(
+                        answer, retrieved_docs, question, confidence
+                    )
+                    if should_retry:
+                        retry_docs = retrieve_context(refined_q, k=5, chat_id=chat_id)
+                        if retry_docs:
+                            retry_use = should_use_context(retry_docs)
+                            retry_answer = generate_answer(question, retry_docs, retry_use)
+                            if "not found" not in retry_answer.lower():
+                                retrieved_docs = retry_docs
+                                answer         = retry_answer
+                                use_context    = retry_use
+                                scores         = [d.get("score", 0) for d in retrieved_docs]
+                                confidence     = _compute_confidence(scores)
+            except Exception as _ve:
+                logger.warning("Validation/retry skipped: %s", _ve)
+
+        sources    = _build_sources(retrieved_docs, use_context)
         context_preview = [d["text"] for d in retrieved_docs] if use_context else []
         mode       = "rag" if use_context else "llm"
 
@@ -307,7 +340,11 @@ async def upload_file(
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
 
-    result = ingest_file(content, file.filename, chat_id=chat_id)
+    # Run the blocking ingest pipeline in a thread so the event loop stays free
+    # for other requests during the (potentially slow) OCR + embed stage.
+    result = await run_in_threadpool(
+        lambda: ingest_file(content, file.filename, chat_id=chat_id)
+    )
 
     if result["success"]:
         logger.info(
@@ -398,5 +435,75 @@ def get_metrics(body: EvalRequest, request: Request):
         "min_score":         report.min_score,
         "hallucination_risk":report.hallucination_risk,
         "sources":           report.sources,
+        "note": "precision/recall/mrr are null when no ground-truth relevant_docs provided",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Full evaluation with LLM-as-judge
+# ---------------------------------------------------------------------------
+
+@app.post("/evaluate")
+def evaluate_answer(body: EvaluateRequest, request: Request):
+    """Full evaluation: quantitative retrieval metrics + LLM-as-judge scoring.
+
+    Quantitative (always):
+      Precision@K, Recall@K, MRR, hallucination_risk, avg/max/min score.
+
+    LLM-as-judge (when body.answer is provided):
+      llm_relevance_score    — does the answer address the question? (0.0–1.0)
+      llm_faithfulness_score — is the answer grounded in the context? (0.0–1.0)
+      llm_judge_reasoning    — one-sentence explanation from the judge.
+
+    Note: LLM judge adds ~2–5 s latency. Run offline / on-demand, not inline.
+    Owner: Aditya (Evaluation & Metrics)
+    """
+    verify_token_from_request(request)
+
+    question = sanitize_input(body.question)
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    chat_id = body.chat_id
+    k = 5
+
+    retrieved_docs = retrieve_context(question, k=k, chat_id=chat_id)
+    use_context    = should_use_context(retrieved_docs)
+
+    report = evaluate_retrieval(
+        query              = question,
+        retrieved_docs     = retrieved_docs,
+        relevant_doc_names = body.relevant_docs,
+        k                  = k,
+        use_context        = use_context,
+    )
+
+    # LLM-as-judge (only when an answer string is supplied)
+    judge_result = {"llm_relevance_score": None, "llm_faithfulness_score": None, "llm_judge_reasoning": None}
+    if body.answer and retrieved_docs:
+        judge_result = llm_judge(question, body.answer, retrieved_docs)
+
+    logger.info(
+        "evaluate user=%s query='%s' risk=%s llm_faith=%s",
+        request.headers.get("authorization", "")[:20],
+        question[:60], report.hallucination_risk,
+        judge_result.get("llm_faithfulness_score"),
+    )
+
+    return {
+        "query":                  report.query,
+        "k":                      report.k,
+        "num_retrieved":          report.num_retrieved,
+        "precision_at_k":         report.precision_at_k,
+        "recall_at_k":            report.recall_at_k,
+        "mrr":                    report.mrr,
+        "avg_score":              report.avg_score,
+        "max_score":              report.max_score,
+        "min_score":              report.min_score,
+        "hallucination_risk":     report.hallucination_risk,
+        "sources":                report.sources,
+        "llm_relevance_score":    judge_result["llm_relevance_score"],
+        "llm_faithfulness_score": judge_result["llm_faithfulness_score"],
+        "llm_judge_reasoning":    judge_result["llm_judge_reasoning"],
         "note": "precision/recall/mrr are null when no ground-truth relevant_docs provided",
     }

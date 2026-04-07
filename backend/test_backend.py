@@ -46,6 +46,15 @@ class TestEmbeddings:
 class TestVectorStore:
     """Test FAISS vector store."""
 
+    def teardown_method(self, method):
+        """Reset the vector store to a clean empty state after each test so
+        test data (e.g. test.pdf) never leaks into the persisted documents.json."""
+        import vector_store as vs
+        vs.index = None
+        vs.documents = []
+        vs._embeddings = None
+        vs.save_index()
+
     def test_create_and_search(self):
         from vector_store import create_index, search
         from embeddings import embed

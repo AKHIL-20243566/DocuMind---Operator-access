@@ -4,7 +4,7 @@ pydantic==2.9.0
 sentence-transformers==3.0.0
 faiss-cpu==1.9.0.post1
 requests==2.32.0
-numpy==1.26.4
+numpy>=1.26.4
 python-dotenv==1.0.1
 python-multipart==0.0.12
 pypdf==4.3.0

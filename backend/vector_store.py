@@ -32,18 +32,42 @@ index       = None
 documents   = []       # list[dict]: text, source, page, chunk_id, [chat_id]
 _embeddings = None     # np.ndarray shape (N, dim) — mirrors documents 1-to-1
 
+# Evaluation-query keywords for section boost (research paper domain)
+_EVAL_KEYWORDS = frozenset([
+    "accuracy", "performance", "result", "results", "score", "metric", "metrics",
+    "bleu", "rouge", "f1", "precision", "recall", "benchmark", "evaluation",
+    "experiment", "experiments", "baseline", "comparison", "improvement",
+])
+
+
+def _has_eval_keyword(query: str) -> bool:
+    """Return True if the query contains research-paper evaluation keywords."""
+    words = set(query.lower().split())
+    return bool(words & _EVAL_KEYWORDS)
+
 
 def _ensure_store_dir():
     os.makedirs(STORE_DIR, exist_ok=True)
 
 
 def _rebuild_faiss(embs: np.ndarray):
-    """Rebuild a flat L2 index from a (N, dim) float32 array."""
+    """Rebuild an HNSW index from a (N, dim) float32 array.
+
+    HNSW (Hierarchical Navigable Small World) provides O(log N) approximate
+    nearest-neighbour search — 10–100× faster than IndexFlatL2 at scale with
+    less than 1% accuracy loss. M=32 neighbours per node is a good default for
+    384-dim sentence embeddings.
+
+    Note: existing saved indexes (FlatL2) are loaded as-is on startup;
+    HNSW kicks in for all new rebuilds (on document delete or first create).
+    """
     global index
     if embs is None or len(embs) == 0:
         index = None
         return
-    idx = faiss.IndexFlatL2(embs.shape[1])
+    idx = faiss.IndexHNSWFlat(embs.shape[1], 32)   # M=32 neighbours
+    idx.hnsw.efConstruction = 200
+    idx.hnsw.efSearch = 64
     idx.add(embs)
     index = idx
 
@@ -144,7 +168,8 @@ def remove_by_source(source_name: str, chat_id: str = None) -> int:
 # ---------------------------------------------------------------------------
 
 def search(query_embedding, k: int = 5, chat_id: str = None,
-           query_text: str = None, use_hybrid: bool = True) -> list:
+           query_text: str = None, use_hybrid: bool = True,
+           section_filter: str = None) -> list:
     """Hybrid search: FAISS semantic + BM25 keyword, merged via Reciprocal Rank Fusion.
     Owner: Ashwin — core retrieval function.
 
@@ -163,6 +188,14 @@ def search(query_embedding, k: int = 5, chat_id: str = None,
         if chat_id and doc_chat_id and doc_chat_id != chat_id:
             continue
         visible.append((i, doc))
+
+    # Metadata filter: restrict retrieval to one or more sections
+    # Accepts str (single section) or list[str] (multiple sections from PageIndex)
+    if section_filter:
+        if isinstance(section_filter, str):
+            section_filter = [section_filter]
+        filter_set = set(section_filter)
+        visible = [(i, doc) for i, doc in visible if doc.get("section") in filter_set]
 
     if not visible:
         return []
@@ -209,6 +242,15 @@ def search(query_embedding, k: int = 5, chat_id: str = None,
         out = dict(doc)
         out["score"] = faiss_score_map.get(pos, 0.0)
         results.append(out)
+
+    # Section boost: up-weight abstract/results chunks for evaluation-type queries.
+    # Improves precision when asking about paper results, metrics, or performance.
+    if query_text and _has_eval_keyword(query_text):
+        _BOOST_SECTIONS = {"abstract", "results", "experiments", "conclusion"}
+        for r in results:
+            if r.get("section") in _BOOST_SECTIONS:
+                r["score"] = min(1.0, r.get("score", 0.0) * 1.2)
+        results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
     return results
 
