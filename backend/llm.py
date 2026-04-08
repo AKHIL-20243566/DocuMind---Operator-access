@@ -10,8 +10,22 @@ import requests
 import json
 import os
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# Ollama inference options — cap token budget and context window to reduce CPU time.
+# num_predict: max tokens to generate (short factual answers rarely exceed 300).
+# num_ctx:     KV-cache context window; 2048 covers all our prompts and is 4× faster
+#              than the llama3 default (8192) on CPU.
+# num_thread:  use all available CPU cores for token generation.
+# temperature: 0 = deterministic, skips sampling overhead.
+_OLLAMA_OPTIONS = {
+    "temperature":  0,
+    "num_predict":  int(os.getenv("OLLAMA_NUM_PREDICT", "400")),
+    "num_ctx":      int(os.getenv("OLLAMA_NUM_CTX",     "2048")),
+    "num_thread":   int(os.getenv("OLLAMA_NUM_THREAD",  "8")),
+}
 
 OLLAMA_BASE     = os.getenv("OLLAMA_URL",   "http://127.0.0.1:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3")
@@ -23,6 +37,8 @@ OLLAMA_TAGS     = f"{OLLAMA_BASE}/api/tags"
 RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.2"))
 
 _ollama_status = None
+_ollama_check_ts: float = 0.0
+_OLLAMA_TTL: float = 30.0   # seconds between live health checks
 
 # ---------------------------------------------------------------------------
 # Research-paper domain instructions
@@ -77,7 +93,12 @@ def check_ollama() -> dict:
 
 
 def is_ollama_available() -> bool:
-    """Always do a fresh check so the backend picks up Ollama if it starts later."""
+    """Cached health check — re-pings Ollama at most once every 30 seconds."""
+    global _ollama_check_ts, _ollama_status
+    now = time.time()
+    if _ollama_status is not None and (now - _ollama_check_ts) < _OLLAMA_TTL:
+        return _ollama_status.get("available", False)
+    _ollama_check_ts = now
     return check_ollama().get("available", False)
 
 
@@ -93,15 +114,20 @@ def build_strict_rag_prompt(question: str, context_docs: list, use_context: bool
     from the retrieved documents. If the answer is not in the docs, it must
     say so explicitly — no hallucination allowed.
     """
+    # Max chars of each chunk text sent to Ollama.
+    # Shorter context = faster prefill without losing key facts.
+    _MAX_CHUNK_CHARS = int(os.getenv("MAX_CHUNK_CHARS", "600"))
+
     if use_context and context_docs:
-        # Build context lines — include section label when available
+        # Build context lines — truncate each chunk to cap prompt length
         context_parts = []
         for doc in context_docs:
             source_label = f"[Source: {doc.get('source', 'Unknown')}, Page {doc.get('page', '?')}"
             if doc.get("section"):
                 source_label += f", Section: {doc['section'].replace('_', ' ').title()}"
             source_label += "]"
-            context_parts.append(f"{source_label}\n{doc['text']}")
+            text = doc["text"][:_MAX_CHUNK_CHARS]
+            context_parts.append(f"{source_label}\n{text}")
         context_text = "\n\n".join(context_parts)
 
         # Add domain-specific instructions for research papers
@@ -151,7 +177,8 @@ def generate_answer(question: str, context_docs: list, use_context: bool = True)
     try:
         response = requests.post(
             OLLAMA_GENERATE,
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                  "options": _OLLAMA_OPTIONS},
             timeout=120,
         )
         response.raise_for_status()
@@ -175,7 +202,8 @@ def generate_answer_stream(question: str, context_docs: list, use_context: bool 
     try:
         response = requests.post(
             OLLAMA_GENERATE,
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": True},
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": True,
+                  "options": _OLLAMA_OPTIONS},
             timeout=120,
             stream=True,
         )

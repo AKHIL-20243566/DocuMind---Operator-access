@@ -18,7 +18,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # Expand factor: retrieve this many candidates before re-ranking
-RERANK_EXPAND = int(os.getenv("RERANK_EXPAND", "3"))
+RERANK_EXPAND = int(os.getenv("RERANK_EXPAND", "2"))
 
 # Cross-encoder model — lightweight, works without GPU
 CROSS_ENCODER_MODEL = os.getenv(

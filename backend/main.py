@@ -9,6 +9,10 @@ import os
 import time
 import json
 import logging
+import hashlib
+import threading
+from contextlib import asynccontextmanager
+from collections import OrderedDict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,6 +41,75 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Answer cache — LRU, keyed by (normalized_question, chat_id)
+# Avoids re-running the full RAG pipeline for repeated questions.
+# ---------------------------------------------------------------------------
+
+_CACHE_MAX   = int(os.getenv("ANSWER_CACHE_SIZE", "100"))
+_CACHE_TTL   = float(os.getenv("ANSWER_CACHE_TTL", "300"))   # seconds
+_answer_cache: "OrderedDict[str, tuple[dict, float]]" = OrderedDict()
+_cache_lock  = threading.Lock()
+
+
+def _cache_key(question: str, chat_id: str | None) -> str:
+    norm = " ".join(question.lower().split())
+    return hashlib.md5(f"{norm}||{chat_id}".encode()).hexdigest()
+
+
+def _cache_get(key: str) -> "dict | None":
+    with _cache_lock:
+        if key not in _answer_cache:
+            return None
+        payload, ts = _answer_cache[key]
+        if time.time() - ts > _CACHE_TTL:
+            del _answer_cache[key]
+            return None
+        _answer_cache.move_to_end(key)   # LRU update
+        return payload
+
+
+def _cache_put(key: str, payload: dict) -> None:
+    with _cache_lock:
+        if key in _answer_cache:
+            _answer_cache.move_to_end(key)
+        _answer_cache[key] = (payload, time.time())
+        while len(_answer_cache) > _CACHE_MAX:
+            _answer_cache.popitem(last=False)
+
+
+# ---------------------------------------------------------------------------
+# Startup: pre-warm ML models so the first real query is fast
+# ---------------------------------------------------------------------------
+
+def _prewarm_models() -> None:
+    """Load embedding model + cross-encoder into memory before any request arrives."""
+    try:
+        logger.info("Pre-warming embedding model…")
+        from embeddings import embed
+        embed("warmup")
+        logger.info("Embedding model ready.")
+    except Exception as e:
+        logger.warning("Embedding pre-warm failed: %s", e)
+
+    try:
+        logger.info("Pre-warming cross-encoder…")
+        from reranker import _get_cross_encoder
+        _get_cross_encoder()
+        logger.info("Cross-encoder ready.")
+    except Exception as e:
+        logger.warning("Cross-encoder pre-warm failed: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Run model pre-warming in a background thread so startup is non-blocking
+    t = threading.Thread(target=_prewarm_models, daemon=True, name="model-prewarm")
+    t.start()
+    yield
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
@@ -45,6 +118,7 @@ app = FastAPI(
     title="DocuMind API",
     description="Hybrid LLM + RAG Knowledge Assistant — MNNIT Internal",
     version="3.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -181,7 +255,7 @@ def chat(q: Question, request: Request):
             detail="Your query was blocked by the safety filter."
         )
 
-    start = time.time()
+    start   = time.time()
     chat_id = q.chat_id
 
     try:
@@ -192,11 +266,17 @@ def chat(q: Question, request: Request):
                 "mode": "llm", "ollama_connected": is_ollama_available(),
             }
 
-        retrieved_docs = retrieve_context(question, k=5, chat_id=chat_id)
-        use_context = should_use_context(retrieved_docs)
-        answer = generate_answer(question, retrieved_docs, use_context)
+        # ── Cache check — skip entire pipeline for repeated questions ──────
+        ckey   = _cache_key(question, chat_id)
+        cached = _cache_get(ckey)
+        if cached:
+            logger.info("chat cache_hit user=%s chat_id=%s", user_email, chat_id)
+            return cached
 
-        # Compute confidence before validator so Strategist can use it
+        retrieved_docs = retrieve_context(question, k=5, chat_id=chat_id)
+        use_context    = should_use_context(retrieved_docs)
+        answer         = generate_answer(question, retrieved_docs, use_context)
+
         scores     = [d.get("score", 0) for d in retrieved_docs]
         confidence = _compute_confidence(scores)
 
@@ -212,7 +292,7 @@ def chat(q: Question, request: Request):
                     if should_retry:
                         retry_docs = retrieve_context(refined_q, k=5, chat_id=chat_id)
                         if retry_docs:
-                            retry_use = should_use_context(retry_docs)
+                            retry_use    = should_use_context(retry_docs)
                             retry_answer = generate_answer(question, retry_docs, retry_use)
                             if "not found" not in retry_answer.lower():
                                 retrieved_docs = retry_docs
@@ -223,22 +303,25 @@ def chat(q: Question, request: Request):
             except Exception as _ve:
                 logger.warning("Validation/retry skipped: %s", _ve)
 
-        sources    = _build_sources(retrieved_docs, use_context)
+        sources         = _build_sources(retrieved_docs, use_context)
         context_preview = [d["text"] for d in retrieved_docs] if use_context else []
-        mode       = "rag" if use_context else "llm"
+        mode            = "rag" if use_context else "llm"
 
         elapsed_ms = (time.time() - start) * 1000
         log_query(question, elapsed_ms, sources, mode, _get_client_ip(request))
-        logger.info("chat user=%s chat_id=%s mode=%s conf=%.2f", user_email, chat_id, mode, confidence)
+        logger.info("chat user=%s chat_id=%s mode=%s conf=%.2f elapsed=%.0fms",
+                    user_email, chat_id, mode, confidence, elapsed_ms)
 
-        return {
-            "answer": answer,
-            "sources": sources,
-            "confidence": confidence,
-            "context": context_preview,
-            "mode": mode,
+        result = {
+            "answer":          answer,
+            "sources":         sources,
+            "confidence":      confidence,
+            "context":         context_preview,
+            "mode":            mode,
             "ollama_connected": is_ollama_available(),
         }
+        _cache_put(ckey, result)
+        return result
 
     except HTTPException:
         raise

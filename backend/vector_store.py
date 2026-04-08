@@ -32,6 +32,11 @@ index       = None
 documents   = []       # list[dict]: text, source, page, chunk_id, [chat_id]
 _embeddings = None     # np.ndarray shape (N, dim) — mirrors documents 1-to-1
 
+# BM25 cache — rebuilt only when _doc_version changes (on add/remove)
+_doc_version:   int = 0
+_bm25_index           = None   # BM25Index over all documents
+_bm25_version:  int = -1
+
 # Evaluation-query keywords for section boost (research paper domain)
 _EVAL_KEYWORDS = frozenset([
     "accuracy", "performance", "result", "results", "score", "metric", "metrics",
@@ -98,7 +103,7 @@ def create_index(embeddings, docs):
 def add_to_index(embeddings, new_docs):
     """Append new embeddings + metadata to the existing index.
     Owner: Ashwin — called after every successful document upload."""
-    global index, _embeddings, documents
+    global index, _embeddings, documents, _doc_version
 
     new_embs = np.atleast_2d(np.array(embeddings, dtype="float32"))
 
@@ -109,6 +114,7 @@ def add_to_index(embeddings, new_docs):
     _embeddings = np.vstack([_embeddings, new_embs])
     documents.extend(new_docs)
     index.add(new_embs)   # incremental add — fast
+    _doc_version += 1
     save_index()
     logger.info("Added %d docs to index (total: %d)", len(new_docs), len(documents))
 
@@ -154,6 +160,7 @@ def remove_by_source(source_name: str, chat_id: str = None) -> int:
 
     # Rebuild FAISS index from cached embeddings (milliseconds, no GPU/model needed)
     _rebuild_faiss(_embeddings)
+    _doc_version += 1
 
     save_index()
     logger.info(
@@ -202,7 +209,7 @@ def search(query_embedding, k: int = 5, chat_id: str = None,
 
     # ── FAISS semantic search ────────────────────────────────────────────
     query_np  = np.atleast_2d(np.array(query_embedding, dtype="float32"))
-    fetch_k   = min(k * 8, len(documents))
+    fetch_k   = min(k * 4, len(documents))
     D, I      = index.search(query_np, fetch_k)
 
     # Map original FAISS indices → position in visible list
@@ -213,15 +220,24 @@ def search(query_embedding, k: int = 5, chat_id: str = None,
         if i in orig_to_vis:
             faiss_ranked.append((orig_to_vis[i], float(1 / (1 + dist))))
 
-    # ── BM25 keyword search ──────────────────────────────────────────────
+    # ── BM25 keyword search (cached index over all docs) ─────────────────
     bm25_ranked: list[tuple[int, float]] = []
     if use_hybrid and query_text and len(visible) > 0:
         try:
-            from bm25 import BM25Index, reciprocal_rank_fusion
-            corpus   = [doc["text"] for _, doc in visible]
-            bm25_idx = BM25Index(corpus)
-            bm25_raw = bm25_idx.search(query_text, k=min(k * 8, len(visible)))
-            bm25_ranked = bm25_raw   # already (visible_pos, score)
+            from bm25 import reciprocal_rank_fusion
+            global _bm25_index, _bm25_version
+            if _bm25_index is None or _bm25_version != _doc_version:
+                from bm25 import BM25Index
+                _bm25_index   = BM25Index([d["text"] for d in documents])
+                _bm25_version = _doc_version
+
+            # Search over all docs; remap to visible positions
+            bm25_all = _bm25_index.search(query_text, k=min(k * 4, len(documents)))
+            bm25_ranked = [
+                (orig_to_vis[orig_idx], score)
+                for orig_idx, score in bm25_all
+                if orig_idx in orig_to_vis
+            ]
 
             merged = reciprocal_rank_fusion(faiss_ranked, bm25_ranked)
             top_positions = [pos for pos, _ in merged[:k]]

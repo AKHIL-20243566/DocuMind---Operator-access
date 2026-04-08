@@ -26,7 +26,7 @@ ENABLE_MULTI_QUERY = os.getenv("ENABLE_MULTI_QUERY", "false").lower() == "true"
 # When True (default), uses the PageIndex hierarchical tree to let the LLM
 # select relevant sections before running FAISS+BM25 search.  Disable with:
 # USE_PAGE_INDEX=false in .env (falls back to flat full-corpus search).
-USE_PAGE_INDEX = os.getenv("USE_PAGE_INDEX", "true").lower() == "true"
+USE_PAGE_INDEX = os.getenv("USE_PAGE_INDEX", "false").lower() == "true"
 
 BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
 PAGE_INDEX_PATH = os.path.join(BASE_DIR, "vector_data", "page_index.json")

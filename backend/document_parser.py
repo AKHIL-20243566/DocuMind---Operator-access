@@ -11,6 +11,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from ocr_engine import ocr_image, compute_file_hash  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Research-paper section type mapping
 # ---------------------------------------------------------------------------
@@ -87,16 +89,16 @@ def _is_table_line(line: str) -> bool:
 
 
 def _preprocess_image_for_ocr(image):
-    """Enhance a PIL image to maximise Tesseract OCR accuracy.
+    """Enhance a PIL image before passing it to the OCR engine.
 
-    Steps that consistently improve Tesseract output:
-    1. Grayscale  — removes colour noise that confuses the engine.
-    2. Scale-up   — Tesseract is tuned for ~300 DPI; scaling narrow images
-                    up to ≥2 000 px wide reliably lifts accuracy on scans.
+    Steps that improve both DL-based (PaddleOCR/EasyOCR) and legacy OCR:
+    1. Grayscale  — removes colour noise that confuses recognition models.
+    2. Scale-up   — scaling narrow images up to ≥1 800 px wide improves
+                    accuracy on low-DPI scans.
     3. Sharpen    — recovers letter edges blurred by JPEG/downsampling artefacts.
     4. Contrast   — makes dark text crisper against light backgrounds.
 
-    Returns a grayscale PIL Image ready for pytesseract.image_to_string().
+    Returns a grayscale PIL Image ready for the OCR engine.
     """
     from PIL import ImageFilter, ImageEnhance
 
@@ -453,7 +455,7 @@ def chunk_structured(text: str, source: str, page: int = 1,
 def _parse_image_bytes_with_diagnostics(content: bytes, filename: str) -> dict:
     """OCR a raw image file and return diagnostics.
     Owner: Anirudh (Data Engineer) — direct image ingestion pipeline.
-    Supports PNG, JPG, JPEG, TIFF, BMP, WEBP via pytesseract + Pillow.
+    Supports PNG, JPG, JPEG, TIFF, BMP, WEBP via PaddleOCR cascade + Pillow.
     """
     diagnostics = {
         "success": False,
@@ -466,28 +468,14 @@ def _parse_image_bytes_with_diagnostics(content: bytes, filename: str) -> dict:
     }
 
     try:
-        import pytesseract
-        from PIL import Image
+        from PIL import Image  # noqa: PLC0415
 
-        tesseract_cmd = _find_tesseract_cmd()
-        if tesseract_cmd and tesseract_cmd != "tesseract":
-            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        image    = Image.open(io.BytesIO(content))
+        image    = _preprocess_image_for_ocr(image)
+        fhash    = compute_file_hash(content)
 
-        # Force a clear error early if Tesseract is missing
-        try:
-            pytesseract.get_tesseract_version()
-        except Exception as exc:
-            raise RuntimeError(
-                "tesseract not found. Install Tesseract OCR and ensure tesseract.exe is in PATH."
-            ) from exc
-
-        image = Image.open(io.BytesIO(content))
-        # Preprocess: grayscale + scale-up + sharpen + contrast boost
-        image = _preprocess_image_for_ocr(image)
-
-        raw_text = pytesseract.image_to_string(image, config=_TESSERACT_CONFIG) or ""
-        text     = _clean_ocr_text(raw_text)
-        chunks   = [c for c in chunk_text(text) if not _is_garbage_chunk(c)]
+        text, _conf = ocr_image(image, file_hash=fhash, page_num=1)
+        chunks = [c for c in chunk_text(text) if not _is_garbage_chunk(c)]
 
         if not chunks:
             diagnostics.update({
@@ -518,12 +506,15 @@ def _parse_image_bytes_with_diagnostics(content: bytes, filename: str) -> dict:
 
     except Exception as exc:
         error_text = str(exc).lower()
-        is_dep_error = "tesseract" in error_text or "not found" in error_text or "pillow" in error_text
+        is_dep_error = any(
+            k in error_text
+            for k in ("ocr", "tesseract", "paddleocr", "pillow", "not found", "is not installed")
+        )
 
         if is_dep_error:
             diagnostics["error_code"] = "OCR_DEPENDENCY_MISSING"
             diagnostics["error_message"] = (
-                "OCR engine unavailable. Install Tesseract OCR + Pillow and ensure tesseract.exe is in PATH."
+                "OCR engine unavailable. Install paddleocr + paddlepaddle (or pytesseract as fallback)."
             )
         else:
             diagnostics["error_code"] = "IMAGE_PARSE_FAILURE"
@@ -664,18 +655,17 @@ def _parse_pdf_bytes_with_fallback(content: bytes, filename: str) -> dict:
     except Exception as exc:
         loader_errors.append(f"OCR: {exc}")
         error_text = str(exc).lower()
-        is_dependency_error = (
-            "tesseract" in error_text
-            or "poppler" in error_text
-            or "pdfinfo" in error_text
-            or "is not installed" in error_text
-            or "not found" in error_text
+        is_dependency_error = any(
+            k in error_text
+            for k in ("ocr", "tesseract", "paddleocr", "poppler", "pdfinfo",
+                      "is not installed", "not found")
         )
 
         if is_dependency_error:
             error_code = "OCR_DEPENDENCY_MISSING"
             error_message = (
-                "OCR engine unavailable. Install Tesseract OCR and Poppler, then ensure both are in PATH."
+                "OCR engine unavailable. Install paddleocr + paddlepaddle and Poppler, "
+                "then ensure Poppler is in PATH."
             )
             status_messages = diagnostics["status_messages"] + ["OCR engine unavailable"]
         else:
@@ -713,29 +703,22 @@ def _parse_pdf_with_unstructured_loader(file_path: str, filename: str) -> list[d
     return documents
 
 
-_TESSERACT_CONFIG = "--psm 3 --oem 3"
-
-
 def _ocr_single_page(args: tuple) -> tuple[int, str]:
     """OCR one page image.  Designed to run in a ThreadPoolExecutor worker.
 
-    Tesseract releases the GIL during its C-level processing, so true thread
-    parallelism is possible here — no need for multiprocessing.
+    Uses the ocr_engine cascade: PaddleOCR → EasyOCR → Tesseract.
+    PaddleOCR and EasyOCR release the GIL during inference, so true thread
+    parallelism is possible — no need for multiprocessing.
 
-    Steps:
-      1. Preprocess (grayscale + scale-up + sharpen + contrast).
-      2. Run Tesseract with explicit PSM/OEM flags.
-      3. Clean output: remove garbage lines, collapse spaces, deduplicate.
+    Args tuple: (page_num, image, file_hash)
 
     Returns (page_num, cleaned_text).
     """
-    import pytesseract
-
-    page_num, image = args
+    page_num, image, file_hash = args
     try:
+        # Basic upscale for very small images still improves DL-based OCR
         processed = _preprocess_image_for_ocr(image)
-        raw  = pytesseract.image_to_string(processed, config=_TESSERACT_CONFIG) or ""
-        text = _clean_ocr_text(raw)
+        text, _conf = ocr_image(processed, file_hash=file_hash, page_num=page_num)
         return page_num, text
     except Exception as exc:
         logger.warning("OCR failed for page %d: %s", page_num, exc)
@@ -748,35 +731,30 @@ def _parse_pdf_with_ocr(content: bytes, filename: str) -> list[dict]:
     Performance design:
     - All pages are converted to PIL images first (one call to convert_from_bytes).
     - Pages are OCR-ed in a ThreadPoolExecutor (up to 4 workers).
-      Tesseract releases the GIL so threads achieve true parallelism.
+      PaddleOCR / EasyOCR release the GIL during inference for true parallelism.
     - Results are collected and sorted back into page order.
+    - SHA-256 hash of file bytes is used to cache per-page OCR results on disk,
+      so re-uploading the same file skips all OCR work.
 
     Quality design:
-    - Each image is preprocessed (grayscale, scale-up, sharpen, contrast boost)
-      before being passed to Tesseract.
-    - Raw OCR output is cleaned (_clean_ocr_text) to remove garbage lines.
+    - Each image is upscaled if < 1800 px wide before OCR (helps DL models too).
+    - PaddleOCR built-in angle classification handles rotated / skewed pages.
     - Chunks with < 25 % alpha content are discarded (_is_garbage_chunk).
     """
-    import pytesseract
-    from pdf2image import convert_from_bytes
-
-    tesseract_cmd = _find_tesseract_cmd()
-    if tesseract_cmd and tesseract_cmd != "tesseract":
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    from pdf2image import convert_from_bytes  # noqa: PLC0415
 
     poppler_path = _find_poppler_bin_dir()
+    fhash = compute_file_hash(content)
 
     try:
-        pytesseract.get_tesseract_version()
+        if poppler_path:
+            images = convert_from_bytes(content, poppler_path=poppler_path)
+        else:
+            images = convert_from_bytes(content)
     except Exception as exc:
         raise RuntimeError(
-            "tesseract not found. Install Tesseract OCR and ensure tesseract.exe is available in PATH."
+            f"PDF to image conversion failed. Ensure Poppler is installed and in PATH. ({exc})"
         ) from exc
-
-    if poppler_path:
-        images = convert_from_bytes(content, poppler_path=poppler_path)
-    else:
-        images = convert_from_bytes(content)
 
     if not images:
         return []
@@ -787,7 +765,7 @@ def _parse_pdf_with_ocr(content: bytes, filename: str) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_ocr_single_page, (page_num, img)): page_num
+            pool.submit(_ocr_single_page, (page_num, img, fhash)): page_num
             for page_num, img in enumerate(images, 1)
         }
         for future in as_completed(futures):
@@ -900,7 +878,7 @@ def _csv_to_chunks(file_obj, filename: str) -> list[dict]:
 
 SUPPORTED_EXTENSIONS = {
     ".pdf", ".docx", ".txt", ".csv", ".md", ".markdown",
-    # Image formats — OCR via pytesseract + Pillow
+    # Image formats — OCR via PaddleOCR cascade + Pillow
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp",
 }
 

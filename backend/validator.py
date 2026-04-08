@@ -86,7 +86,7 @@ def check_answer_grounded(answer: str, context_chunks: list[dict]) -> dict:
         return {"grounded": True, "coverage": 1.0, "unsupported_claims": []}
 
     try:
-        from embeddings import embed
+        from embeddings import embed_cached
 
         # Split answer into meaningful sentences (skip very short fragments)
         sentences = [
@@ -96,13 +96,14 @@ def check_answer_grounded(answer: str, context_chunks: list[dict]) -> dict:
         if not sentences:
             return {"grounded": True, "coverage": 1.0, "unsupported_claims": []}
 
-        # Embed context chunks and answer sentences
+        # Embed context chunks (hits cache — already embedded during retrieval)
+        # and answer sentences (new text, not cached)
         context_texts = [c.get("text", "") for c in context_chunks if c.get("text")]
         if not context_texts:
             return {"grounded": False, "coverage": 0.0, "unsupported_claims": sentences}
 
-        context_embs  = embed(context_texts)    # shape (M, dim)
-        sentence_embs = embed(sentences)         # shape (N, dim)
+        context_embs  = embed_cached(context_texts)   # shape (M, dim) — cache hits
+        sentence_embs = embed_cached(sentences)        # shape (N, dim)
 
         supported   = []
         unsupported = []

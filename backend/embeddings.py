@@ -30,7 +30,9 @@ def embed(texts):
     model = _get_model()
     if isinstance(texts, str):
         texts = [texts]
-    embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+    embeddings = model.encode(
+        texts, convert_to_numpy=True, show_progress_bar=False, batch_size=32,
+    )
     return np.array(embeddings, dtype="float32")
 
 
@@ -53,7 +55,9 @@ def embed_cached(texts):
 
     if to_embed:
         model = _get_model()
-        new_embeddings = model.encode(to_embed, convert_to_numpy=True, show_progress_bar=False)
+        new_embeddings = model.encode(
+            to_embed, convert_to_numpy=True, show_progress_bar=False, batch_size=32,
+        )
         for idx, text, emb in zip(to_embed_indices, to_embed, new_embeddings):
             key = hashlib.md5(text.encode()).hexdigest()
             _cache[key] = emb
