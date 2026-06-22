@@ -1,150 +1,184 @@
 # DocuMind — Hybrid RAG Intelligent Document Assistant
 
-An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval-Augmented Generation (RAG), and local LLM inference to answer questions from uploaded documents with high contextual accuracy.
+An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval-Augmented Generation (RAG), and Local LLMs to provide accurate, context-aware answers from uploaded documents.
 
-🎥 **Demo Video:**
+🎥 **Project Demo Video**
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
-
-💻 **GitHub Repository:**
-[Add Repository Link]
 
 ---
 
-# Project Overview
+# Overview
 
-DocuMind was developed as part of our Semester IV Artificial Intelligence project at MNNIT.
+DocuMind was developed as part of our Semester IV Artificial Intelligence project at Motilal Nehru National Institute of Technology (MNNIT).
 
-The goal was to build an intelligent document assistant capable of understanding uploaded PDFs, scanned documents, images, and text files while generating context-aware answers grounded in the document content.
+The project began as an academic requirement but evolved into a practical exploration of how modern AI retrieval systems are built and optimized.
 
-Instead of building a simple chatbot, we focused on solving a real challenge in AI systems:
+Our objective was to create an intelligent document assistant capable of:
 
-> How can we retrieve the right information accurately from large unstructured documents?
+* Understanding PDFs, images, and scanned documents
+* Retrieving information accurately
+* Generating grounded responses using local LLMs
+* Improving retrieval quality through hybrid search techniques
 
-To address this problem, we designed a Hybrid RAG architecture that combines semantic search, keyword retrieval, OCR-based document understanding, reranking, and local LLM generation.
+Rather than building a simple chatbot, we focused on solving a real-world AI challenge:
+
+> How can we retrieve the right information from large unstructured documents while maintaining both contextual understanding and factual accuracy?
 
 ---
 
 # The Problem
 
-Traditional document search systems generally rely on:
+Traditional document search systems generally rely on one of two approaches:
 
-### Keyword Search
+### Keyword-Based Search
 
-* Fast and simple
-* Fails when wording changes
-* Poor semantic understanding
+* Fast and efficient
+* Works well for exact matches
+* Struggles with contextual understanding
 
-### Pure Semantic Retrieval
+### Semantic Search
 
-* Understands context
-* Often misses exact technical terms
-* Struggles with IDs, numerical values, and structured data
+* Understands meaning and context
+* Handles natural language queries
+* Can miss exact technical terms, IDs, definitions, and structured information
 
-This frequently results in inaccurate retrieval and lower answer quality.
+Both approaches have strengths and weaknesses.
+
+To overcome these limitations, we designed a Hybrid Retrieval Architecture that combines semantic understanding with exact-match retrieval.
 
 ---
 
 # Our Solution
 
-DocuMind uses a multi-stage Hybrid Retrieval Pipeline:
+DocuMind combines multiple retrieval strategies into a single intelligent pipeline.
 
 ```text
-Upload Document
-        ↓
-OCR / Text Extraction
-        ↓
-Chunking & Preprocessing
-        ↓
-PageIndex (Vectorless Retrieval)
-        ↓
+Document Upload
+      ↓
+Document Parsing / OCR
+      ↓
+Text Cleaning & Chunking
+      ↓
+PageIndex (Vectorless Navigation)
+      ↓
 FAISS Semantic Retrieval
-        ↓
+      ↓
 BM25 Keyword Retrieval
-        ↓
+      ↓
 Reciprocal Rank Fusion (RRF)
-        ↓
-Cross-Encoder Reranking
-        ↓
+      ↓
+Cross Encoder Reranking
+      ↓
 Llama 3.2B (Ollama)
-        ↓
-Grounded Response
+      ↓
+Grounded AI Response
 ```
 
-This architecture improves retrieval accuracy by combining exact-match retrieval with semantic understanding.
+This architecture significantly improves retrieval quality compared to traditional RAG implementations.
 
 ---
 
-# Core Features
+# Key Features
 
-### Document Understanding
+## Document Understanding
 
 * PDF support
 * DOCX support
-* TXT, CSV and Markdown support
-* Image document support
-* OCR for scanned documents
+* TXT support
+* CSV support
+* Markdown support
+* Image support
+* Scanned document processing
 
-### Hybrid Retrieval
+## OCR Processing
 
-* Vector retrieval using FAISS HNSW
+During development we evaluated:
+
+* Tesseract OCR
+* EasyOCR
+* PaddleOCR
+
+After extensive testing, PaddleOCR was selected as the final OCR solution due to its higher accuracy and better performance on scanned academic and structured documents.
+
+Final OCR workflow:
+
+```text
+Scanned PDF / Image
+        ↓
+Image Preprocessing
+        ↓
+PaddleOCR
+        ↓
+Text Cleaning
+        ↓
+Chunking
+        ↓
+Indexing
+```
+
+## Hybrid Retrieval System
+
+* FAISS HNSW vector search
 * BM25 keyword retrieval
-* Vectorless PageIndex navigation
+* PageIndex vectorless navigation
 * Reciprocal Rank Fusion (RRF)
-* Cross-encoder reranking
+* Cross Encoder reranking
 
-### AI Answer Generation
+## AI Answer Generation
 
 * Llama 3.2B via Ollama
 * Context-aware prompting
-* Grounded responses
-* Streaming generation
+* Grounded answer generation
+* Streaming responses
 
-### User Experience
+## User Experience
 
-* Interactive chat interface
+* Interactive AI chat interface
 * Retrieval confidence visualization
+* Context preview system
 * Source tracking
-* Context preview
+* Responsive UI
 * Light and Dark themes
 
-### Security
+## Security Features
 
 * Institutional email authentication
+* API protection
+* Prompt injection defenses
 * Rate limiting
-* Prompt injection protection
 * Query audit logging
 
 ---
 
 # Technologies Used
 
-### AI & Retrieval
+## AI & Retrieval
 
-* FAISS
+* FAISS (HNSW)
 * BM25
 * Sentence Transformers
 * Cross Encoder Reranking
 * Ollama
 * Llama 3.2B
 
-### OCR & Document Processing
+## OCR & Document Processing
 
 * PaddleOCR
-* EasyOCR
-* Tesseract OCR
 * pdf2image
+* Poppler
 
-### Backend
+## Backend
 
 * Python
 * FastAPI
 
-### Frontend
+## Frontend
 
 * React
 * Vite
+* Lucide React
 
-### DevOps
+## Infrastructure
 
 * Docker
 * Docker Compose
@@ -153,83 +187,99 @@ This architecture improves retrieval accuracy by combining exact-match retrieval
 
 # What We Learned
 
-This project provided practical experience with:
+This project provided practical exposure to several important AI engineering concepts.
 
-### Retrieval-Augmented Generation
+### Retrieval-Augmented Generation (RAG)
 
 * Multi-stage retrieval pipelines
 * Context construction
+* Grounded generation
 * Retrieval evaluation
+
+### Information Retrieval
+
+* FAISS indexing
+* Hybrid search systems
+* BM25 retrieval
+* Retrieval fusion
+* Cross-encoder reranking
 
 ### OCR & Document Intelligence
 
 * Scanned document processing
 * OCR optimization
 * Text extraction workflows
-
-### Information Retrieval
-
-* FAISS indexing
-* BM25 search
-* Hybrid retrieval systems
-* Reranking strategies
+* Data cleaning pipelines
 
 ### LLM Engineering
 
+* Local LLM deployment
 * Prompt engineering
 * Context injection
-* Local model deployment with Ollama
+* Streaming generation
 
-### Full-Stack Development
+### Full Stack Development
 
-* React frontend development
-* FastAPI backend development
-* API integration
+* React frontend architecture
+* FastAPI backend APIs
 * Authentication systems
+* API integration
+* UI/UX design
 
-One of the biggest lessons was realizing that retrieval quality often has a greater impact on answer quality than the language model itself.
+One of our biggest takeaways was realizing that improving retrieval quality often has a larger impact on answer quality than changing the language model itself.
 
 ---
 
 # Challenges Faced
 
-### Retrieval Accuracy
+## Retrieval Accuracy
 
-Semantic retrieval alone was not sufficient for exact queries.
+Initially, semantic retrieval alone was not sufficient for exact queries.
 
-**Solution**
+### Solution
 
 * Added BM25 retrieval
-* Implemented PageIndex
-* Added retrieval fusion and reranking
+* Introduced PageIndex
+* Implemented retrieval fusion
+* Added reranking
 
-### OCR Reliability
+---
 
-Scanned documents often produced noisy text.
+## OCR Reliability
 
-**Solution**
+Early OCR experiments produced inconsistent results on scanned documents.
 
-* Implemented OCR fallback cascade
-* Added preprocessing and caching
+### Solution
 
-### Context Loss
+* Evaluated multiple OCR frameworks
+* Migrated to PaddleOCR
+* Added image preprocessing
+* Improved extraction quality significantly
 
-Poor chunking occasionally reduced retrieval quality.
+---
 
-**Solution**
+## Context Loss
+
+Chunk boundaries occasionally caused loss of important context.
+
+### Solution
 
 * Structure-aware chunking
-* Overlapping context windows
+* Chunk overlap strategies
+* Section-based retrieval
 
-### System Performance
+---
 
-Multiple retrieval stages increased latency.
+## Performance Optimization
 
-**Solution**
+The multi-stage retrieval pipeline increased computational overhead.
+
+### Solution
 
 * Embedding caching
 * OCR caching
 * Retrieval pre-filtering
+* Efficient indexing strategies
 
 ---
 
@@ -243,9 +293,22 @@ This project was developed collaboratively by:
 * Ashwin Kurian Jacob
 * Aditya Patnaik
 
-Each member contributed across development, debugging, testing, retrieval optimization, UI improvements, and system integration.
+The project involved continuous experimentation, debugging, testing, and optimization across both AI and software engineering components.
 
-A major part of the project involved experimentation, architectural redesign, and continuous refinement of retrieval quality.
+Each team member contributed to various aspects of the project, including retrieval systems, OCR integration, frontend development, backend APIs, system architecture, testing, and overall project refinement.
+
+---
+
+# Real-World Applications
+
+DocuMind can be extended to:
+
+* Enterprise knowledge assistants
+* Academic research assistants
+* Legal document retrieval systems
+* Healthcare documentation systems
+* Internal organizational search engines
+* AI-powered knowledge management platforms
 
 ---
 
@@ -254,25 +317,30 @@ A major part of the project involved experimentation, architectural redesign, an
 Planned enhancements include:
 
 * Multi-user support
-* Persistent conversation memory
-* Advanced RAG agents
-* Better OCR models
+* Persistent chat history
+* Role-based access control
+* Better document visualization
 * Table-aware document understanding
 * Multi-document reasoning
 * Cloud deployment
-* GPU-accelerated retrieval
-* Fine-tuned domain-specific LLMs
+* GPU-accelerated inference
+* Advanced Agentic RAG workflows
+* Fine-tuned domain-specific models
 
 ---
 
-# Resources
+# Project Resources
 
-🎥 Demo Video:
+🎥 Demo Video
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
 
-💻 GitHub Repository:
+💻 GitHub Repository
 [Add Repository Link]
+
+If you're interested in Retrieval-Augmented Generation, Document Intelligence, OCR systems, Information Retrieval, or Local LLM applications, feel free to explore the repository and demo.
 
 ---
 
-If you're interested in AI-powered document intelligence, retrieval systems, OCR workflows, or Hybrid RAG architectures, feel free to explore the repository and demo.
+## License
+
+MIT License
