@@ -1,4 +1,4 @@
-# DocuMind — Hybrid RAG Intelligent Document Assistant
+# 🔍 DocuMind — Hybrid RAG Intelligent Document Assistant
 
 An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval-Augmented Generation (RAG), and Local LLMs to provide accurate, context-aware answers from uploaded documents.
 
