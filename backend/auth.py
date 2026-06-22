@@ -11,6 +11,13 @@ import time
 import logging
 from fastapi import HTTPException, Request
 
+try:
+    import jwt
+    from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+    _JWT_AVAILABLE = True
+except ImportError:
+    _JWT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -42,10 +49,8 @@ def _hash_password(password: str) -> str:
 
 def _create_token(email: str) -> str:
     """Sign and return a JWT for the given email."""
-    try:
-        import jwt
-    except ImportError:
-        raise RuntimeError("PyJWT is required. Run: pip install PyJWT>=2.9.0")
+    if not _JWT_AVAILABLE:
+        raise RuntimeError("PyJWT is required. Run: pip install --force-reinstall cryptography PyJWT>=2.9.0")
     exp = int(time.time()) + TOKEN_EXPIRY_HOURS * 3600
     payload = {"sub": email, "exp": exp, "iat": int(time.time())}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -110,11 +115,8 @@ def verify_token_from_request(request: Request) -> str:
     Returns the authenticated user's email on success.
     Raises HTTP 401 on failure.
     """
-    try:
-        import jwt
-        from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
-    except ImportError:
-        raise RuntimeError("PyJWT is required.")
+    if not _JWT_AVAILABLE:
+        raise RuntimeError("PyJWT is required. Run: pip install --force-reinstall cryptography PyJWT>=2.9.0")
 
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):

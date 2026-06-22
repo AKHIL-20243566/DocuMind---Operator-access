@@ -38,7 +38,7 @@ RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.2"))
 
 _ollama_status = None
 _ollama_check_ts: float = 0.0
-_OLLAMA_TTL: float = 30.0   # seconds between live health checks
+_OLLAMA_TTL: float = 10.0   # seconds between live health checks
 
 # ---------------------------------------------------------------------------
 # Research-paper domain instructions
@@ -83,11 +83,19 @@ def check_ollama() -> dict:
 
     models_raw = _try_url(OLLAMA_TAGS)
 
+    # Windows DNS quirk: 'localhost' can resolve slowly or fail — retry with 127.0.0.1
+    if models_raw is None and "localhost" in OLLAMA_TAGS:
+        fallback_url = OLLAMA_TAGS.replace("localhost", "127.0.0.1")
+        logger.info("Retrying Ollama check with 127.0.0.1 fallback: %s", fallback_url)
+        models_raw = _try_url(fallback_url)
+
     if models_raw is not None:
         models = [m["name"] for m in models_raw]
         _ollama_status = {"available": True, "models": models}
+        logger.info("Ollama connected — models: %s", models)
         return _ollama_status
 
+    logger.warning("Ollama not reachable at %s", OLLAMA_TAGS)
     _ollama_status = {"available": False, "models": []}
     return _ollama_status
 
