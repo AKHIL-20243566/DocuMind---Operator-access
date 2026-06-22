@@ -334,13 +334,6 @@ Planned enhancements include:
 🎥 Demo Video
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
 
-💻 GitHub Repository
-[Add Repository Link]
-
-If you're interested in Retrieval-Augmented Generation, Document Intelligence, OCR systems, Information Retrieval, or Local LLM applications, feel free to explore the repository and demo.
+If you're interested in Retrieval-Augmented Generation, Document Intelligence, OCR systems, Information Retrieval, or Local LLM applications, feel free to explore the demo.
 
 ---
-
-## License
-
-MIT License
