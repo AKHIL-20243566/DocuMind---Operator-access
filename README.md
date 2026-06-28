@@ -5,10 +5,10 @@ An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![FAISS](https://img.shields.io/badge/FAISS-Vector%20Search-blue?style=for-the-badge)
-![BM25](https://img.shields.io/badge/BM25-Retrieval-orange?style=for-the-badge)
-![PaddleOCR](https://img.shields.io/badge/PaddleOCR-OCR-green?style=for-the-badge)
-![Ollama](https://img.shields.io/badge/Ollama-LLM-black?style=for-the-badge)
+![FAISS](https://img.shields.io/badge/FAISS-1E88E5?style=for-the-badge)
+![BM25](https://img.shields.io/badge/BM25-F57C00?style=for-the-badge)
+![PaddleOCR](https://img.shields.io/badge/PaddleOCR-43A047?style=for-the-badge)
+![Ollama](https://img.shields.io/badge/Ollama-424242?style=for-the-badge)
 
 🎥 **Project Demo Video**
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
