@@ -7,7 +7,7 @@ https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive
 
 ---
 
-# Overview
+## Overview
 
 DocuMind was developed as part of our Semester IV Artificial Intelligence project at Motilal Nehru National Institute of Technology (MNNIT).
 
@@ -15,16 +15,14 @@ The project began as an academic requirement but evolved into a practical explor
 
 Our objective was to create an intelligent document assistant capable of:
 
-* Understanding PDFs, images, and scanned documents
-* Retrieving information accurately
+* Understanding **30+ PDFs**, including scanned documents
+* Retrieving information accurately using hybrid search
 * Generating grounded responses using local LLMs
-* Improving retrieval quality through hybrid search techniques
+* Improving retrieval quality through multi-stage retrieval and reranking
 
 Rather than building a simple chatbot, we focused on solving a real-world AI challenge:
 
 > How can we retrieve the right information from large unstructured documents while maintaining both contextual understanding and factual accuracy?
-
----
 
 # The Problem
 
@@ -47,10 +45,11 @@ Both approaches have strengths and weaknesses.
 To overcome these limitations, we designed a Hybrid Retrieval Architecture that combines semantic understanding with exact-match retrieval.
 
 ---
-
 # Our Solution
 
-DocuMind combines multiple retrieval strategies into a single intelligent pipeline.
+DocuMind combines multiple retrieval strategies into a **5-stage Hybrid RAG pipeline** that processes uploaded documents, retrieves relevant context, and generates grounded responses.
+
+The system currently supports **30+ uploaded PDFs** and indexes **500+ document chunks** generated through intelligent chunking and metadata extraction.
 
 ```text
 Document Upload
@@ -76,7 +75,6 @@ Grounded AI Response
 
 This architecture significantly improves retrieval quality compared to traditional RAG implementations.
 
----
 
 # Key Features
 
@@ -90,31 +88,25 @@ This architecture significantly improves retrieval quality compared to tradition
 * Image support
 * Scanned document processing
 
+## Project Highlights
+
+- 📄 Supports ingestion of **30+ PDFs**, including scanned documents.
+- 📚 Indexed and retrieved information from **500+ document chunks** using intelligent chunking and metadata generation.
+- 🔍 Evaluated **3 OCR frameworks** before selecting PaddleOCR.
+- ⚙️ Designed a **5-stage Hybrid RAG pipeline** combining semantic retrieval, lexical retrieval, retrieval fusion, reranking, and grounded response generation.
+  
 ## OCR Processing
 
-During development we evaluated:
+During development we evaluated **three OCR frameworks**:
 
 * Tesseract OCR
 * EasyOCR
 * PaddleOCR
 
-After extensive testing, PaddleOCR was selected as the final OCR solution due to its higher accuracy and better performance on scanned academic and structured documents.
+After extensive testing, **PaddleOCR** was selected as the final OCR solution due to its higher accuracy and better performance on scanned academic and structured documents.
 
-Final OCR workflow:
+The final ingestion pipeline supports **30+ PDFs**, including scanned documents processed through OCR before indexing.
 
-```text
-Scanned PDF / Image
-        ↓
-Image Preprocessing
-        ↓
-PaddleOCR
-        ↓
-Text Cleaning
-        ↓
-Chunking
-        ↓
-Indexing
-```
 
 ## Hybrid Retrieval System
 
