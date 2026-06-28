@@ -1,11 +1,6 @@
 # 🔍 DocuMind — Hybrid RAG Intelligent Document Assistant
 
 An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval-Augmented Generation (RAG), and Local LLMs to provide accurate, context-aware answers from uploaded documents.
-
-🎥 **Project Demo Video**
-https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
-
----
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -14,6 +9,11 @@ https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive
 ![BM25](https://img.shields.io/badge/BM25-Retrieval-orange)
 ![PaddleOCR](https://img.shields.io/badge/PaddleOCR-OCR-green)
 ![Ollama](https://img.shields.io/badge/Ollama-LLM-black)
+
+🎥 **Project Demo Video**
+https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
+
+---
 
 ## 📖 Overview
 
