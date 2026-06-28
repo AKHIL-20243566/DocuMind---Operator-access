@@ -7,7 +7,7 @@ https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive
 
 ---
 
-## Overview
+## 📖 Overview
 
 DocuMind was developed as part of our Semester IV Artificial Intelligence project at Motilal Nehru National Institute of Technology (MNNIT).
 
@@ -24,7 +24,7 @@ Rather than building a simple chatbot, we focused on solving a real-world AI cha
 
 > How can we retrieve the right information from large unstructured documents while maintaining both contextual understanding and factual accuracy?
 
-# The Problem
+# 🎯 The Problem
 
 Traditional document search systems generally rely on one of two approaches:
 
@@ -45,7 +45,7 @@ Both approaches have strengths and weaknesses.
 To overcome these limitations, we designed a Hybrid Retrieval Architecture that combines semantic understanding with exact-match retrieval.
 
 ---
-# Our Solution
+# 🏗️ Our Solution
 
 DocuMind combines multiple retrieval strategies into a **5-stage Hybrid RAG pipeline** that processes uploaded documents, retrieves relevant context, and generates grounded responses.
 
@@ -76,9 +76,9 @@ Grounded AI Response
 This architecture significantly improves retrieval quality compared to traditional RAG implementations.
 
 
-# Key Features
+# ✨ Key Features
 
-## Document Understanding
+## 📄 Document Understanding
 
 * PDF support
 * DOCX support
@@ -88,14 +88,14 @@ This architecture significantly improves retrieval quality compared to tradition
 * Image support
 * Scanned document processing
 
-## Project Highlights
+## 🚀 Project Highlights
 
 -  Supports ingestion of **30+ PDFs**, including scanned documents.
 -  Indexed and retrieved information from **500+ document chunks** using intelligent chunking and metadata generation.
 -  Evaluated **3 OCR frameworks** before selecting PaddleOCR.
 -  Designed a **5-stage Hybrid RAG pipeline** integrating hybrid retrieval, retrieval fusion, reranking, and grounded response generation.
   
-## OCR Processing
+## 🔍 OCR Processing
 
 During development we evaluated **three OCR frameworks**:
 
@@ -108,7 +108,7 @@ After extensive testing, **PaddleOCR** was selected as the final OCR solution du
 The final ingestion pipeline supports **30+ PDFs**, including scanned documents processed through OCR before indexing.
 
 
-## Hybrid Retrieval System
+## ⚙️ Hybrid Retrieval System
 
 * FAISS HNSW vector search
 * BM25 keyword retrieval
@@ -116,14 +116,14 @@ The final ingestion pipeline supports **30+ PDFs**, including scanned documents 
 * Reciprocal Rank Fusion (RRF)
 * Cross Encoder reranking
 
-## AI Answer Generation
+## 🤖 AI Answer Generation
 
 * Llama 3.2B via Ollama
 * Context-aware prompting
 * Grounded answer generation
 * Streaming responses
 
-## User Experience
+## 🖥️ User Experience
 
 * Interactive AI chat interface
 * Retrieval confidence visualization
@@ -132,7 +132,7 @@ The final ingestion pipeline supports **30+ PDFs**, including scanned documents 
 * Responsive UI
 * Light and Dark themes
 
-## Security Features
+## 🔐 Security Features
 
 * Institutional email authentication
 * API protection
@@ -142,9 +142,9 @@ The final ingestion pipeline supports **30+ PDFs**, including scanned documents 
 
 ---
 
-# Technologies Used
+# 🧠 Technologies Used
 
-## AI & Retrieval
+## 🤖 AI & Retrieval
 
 * FAISS (HNSW)
 * BM25
@@ -153,31 +153,31 @@ The final ingestion pipeline supports **30+ PDFs**, including scanned documents 
 * Ollama
 * Llama 3.2B
 
-## OCR & Document Processing
+## 📄 OCR & Document Processing
 
 * PaddleOCR
 * pdf2image
 * Poppler
 
-## Backend
+## ⚙️ Backend
 
 * Python
 * FastAPI
 
-## Frontend
+## 🎨 Frontend
 
 * React
 * Vite
 * Lucide React
 
-## Infrastructure
+## 🐳 Infrastructure
 
 * Docker
 * Docker Compose
 
 ---
 
-# What We Learned
+# 🎓 What We Learned
 
 This project provided practical exposure to several important AI engineering concepts.
 
@@ -222,7 +222,7 @@ One of our biggest takeaways was realizing that improving retrieval quality ofte
 
 ---
 
-# Challenges Faced
+# 🚧 Challenges Faced
 
 ## Retrieval Accuracy
 
@@ -275,7 +275,7 @@ The multi-stage retrieval pipeline increased computational overhead.
 
 ---
 
-# Team & Collaboration
+# 👥 Team & Collaboration
 
 This project was developed collaboratively by:
 
@@ -291,7 +291,7 @@ Each team member contributed to various aspects of the project, including retrie
 
 ---
 
-# Real-World Applications
+# 🌍 Real-World Applications
 
 DocuMind can be extended to:
 
@@ -304,7 +304,7 @@ DocuMind can be extended to:
 
 ---
 
-# Future Improvements
+# 🔮 Future Improvements
 
 Planned enhancements include:
 
@@ -321,7 +321,7 @@ Planned enhancements include:
 
 ---
 
-# Project Resources
+# 📚 Project Resources
 
 🎥 Demo Video
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
