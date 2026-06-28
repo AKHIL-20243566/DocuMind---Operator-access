@@ -93,7 +93,7 @@ This architecture significantly improves retrieval quality compared to tradition
 - 📄 Supports ingestion of **30+ PDFs**, including scanned documents.
 - 📚 Indexed and retrieved information from **500+ document chunks** using intelligent chunking and metadata generation.
 - 🔍 Evaluated **3 OCR frameworks** before selecting PaddleOCR.
-- ⚙️ Designed a **5-stage Hybrid RAG pipeline** combining semantic retrieval, lexical retrieval, retrieval fusion, reranking, and grounded response generation.
+- ⚙️ Designed a **5-stage Hybrid RAG pipeline** integrating hybrid retrieval, retrieval fusion, reranking, and grounded response generation.
   
 ## OCR Processing
 
