@@ -1,15 +1,14 @@
 # 🔍 DocuMind — Hybrid RAG Intelligent Document Assistant
 
 An AI-powered document intelligence platform that combines OCR, Hybrid Retrieval-Augmented Generation (RAG), and Local LLMs to provide accurate, context-aware answers from uploaded documents.
-
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
-![FAISS](https://img.shields.io/badge/FAISS-Vector%20Search-blue)
-![BM25](https://img.shields.io/badge/BM25-Retrieval-orange)
-![PaddleOCR](https://img.shields.io/badge/PaddleOCR-OCR-green)
-![Ollama](https://img.shields.io/badge/Ollama-LLM-black)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![FAISS](https://img.shields.io/badge/FAISS-Vector%20Search-blue?style=for-the-badge)
+![BM25](https://img.shields.io/badge/BM25-Retrieval-orange?style=for-the-badge)
+![PaddleOCR](https://img.shields.io/badge/PaddleOCR-OCR-green?style=for-the-badge)
+![Ollama](https://img.shields.io/badge/Ollama-LLM-black?style=for-the-badge)
 
 🎥 **Project Demo Video**
 https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
