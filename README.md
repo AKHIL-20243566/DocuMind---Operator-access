@@ -320,12 +320,3 @@ Planned enhancements include:
 * Fine-tuned domain-specific models
 
 ---
-
-# 📚 Project Resources
-
-🎥 Demo Video
-https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive_link
-
-If you're interested in Retrieval-Augmented Generation, Document Intelligence, OCR systems, Information Retrieval, or Local LLM applications, feel free to explore the demo.
-
----
