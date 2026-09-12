@@ -18,10 +18,9 @@ https://drive.google.com/file/d/1EJbwFjn6ZXuh0O6RjVIfmensLhCBliM3/view?usp=drive
 
 ## 📖 Overview
 
-DocuMind was developed as part of our Semester IV Artificial Intelligence project at Motilal Nehru National Institute of Technology (MNNIT).
+DocuMind was developed as an exploration of how AI and Large Language Models (LLMs) work, particularly how modern AI retrieval systems can be implemented in practical applications.
 
-The project began as an academic requirement but evolved into a practical exploration of how modern AI retrieval systems are built and optimized.
-
+We wanted to understand how LLMs retrieve, process, and use information, and learn how these concepts could be implemented in DocuMind. The project evolved into a hands-on exploration of building and optimizing an AI-powered retrieval system.
 Our objective was to create an intelligent document assistant capable of:
 
 * Understanding **30+ PDFs**, including scanned documents
